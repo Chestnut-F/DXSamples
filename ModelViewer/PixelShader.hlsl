@@ -1,4 +1,8 @@
-float4        g_txBaseColorFactor : register(b1);
+cbuffer g_material : register(b1)
+{
+    float4 gBaseColorFactor;
+};
+
 Texture2D     g_txDiffuse : register(t0);
 SamplerState  g_sampler : register(s0);
 
@@ -12,5 +16,5 @@ struct VSOut
 
 float4 main(VSOut input) : SV_TARGET
 {
-    return g_txDiffuse.Sample(g_sampler, input.uv) * g_txBaseColorFactor;
+    return g_txDiffuse.Sample(g_sampler, input.uv) * gBaseColorFactor;
 }
