@@ -13,8 +13,10 @@ ModelViewer::ModelViewer(UINT width, UINT height, std::wstring name):
 void ModelViewer::OnInit()
 {
     m_camera.Init({ 0, 1, 0 });
-    m_camera.SetMoveSpeed(5.0f);
-    m_camera.SetTurnSpeed(XM_PIDIV2);
+    m_camera.SetMoveSpeed(20.0f);
+    m_camera.SetTurnSpeed(XM_PI);
+
+    m_pLight = new DXLight({ 1.f, 1.f, 1.f }, 10000.f, { 0.f, 100.f, 0.f });
 
     InitDevice();
     CreateDescriptorHeaps();
@@ -204,15 +206,17 @@ void ModelViewer::CreateRootSignature()
         featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
     }
 
-    CD3DX12_DESCRIPTOR_RANGE1 ranges[3];
+    CD3DX12_DESCRIPTOR_RANGE1 ranges[4];
     ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-    ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 1, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 2, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
 
-    CD3DX12_ROOT_PARAMETER1 rootParameters[3];
-    rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
-    rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
+    CD3DX12_ROOT_PARAMETER1 rootParameters[4];
+    rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_ALL);
     rootParameters[2].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[3].InitAsDescriptorTable(1, &ranges[3], D3D12_SHADER_VISIBILITY_PIXEL);
 
     D3D12_STATIC_SAMPLER_DESC sampler = {};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -293,7 +297,7 @@ void ModelViewer::LoadAssets()
     m_pModel = new DXModel(s_assetFullPath);
 
     D3D12_DESCRIPTOR_HEAP_DESC cbvSrvHeapDesc = {};
-    cbvSrvHeapDesc.NumDescriptors = m_pModel->primitiveSize * 3;
+    cbvSrvHeapDesc.NumDescriptors = LightCount + m_pModel->primitiveSize * 3;
     cbvSrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     cbvSrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvSrvHeapDesc, IID_PPV_ARGS(&m_cbvSrvHeap)));
@@ -301,7 +305,9 @@ void ModelViewer::LoadAssets()
 
     m_cbvSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    m_pModel->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), m_cbvSrvDescriptorSize);
+    m_pLight->UploadLight(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), 0, m_cbvSrvDescriptorSize);
+
+    m_pModel->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), LightCount, m_cbvSrvDescriptorSize);
 }
 
 void ModelViewer::OnUpdate()
@@ -323,7 +329,8 @@ void ModelViewer::OnUpdate()
     XMMATRIX view = m_camera.GetViewMatrix();
     XMMATRIX proj = m_camera.GetProjectionMatrix(XM_PI / 3.0f, m_aspectRatio);
 
-    m_pModel->Transform(view, proj);
+    m_pModel->Update(m_camera.GetPosition(), view, proj);
+    m_pLight->UpdateLight(m_pLight->GetPosition());
 }
 
 void ModelViewer::OnRender()
@@ -357,7 +364,14 @@ void ModelViewer::PopulateCommandList()
     m_commandList->ClearDepthStencilView(m_dsvHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
     m_commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
 
-    m_pModel->Draw(m_commandList.Get(), m_rootSignature.Get(), m_cbvSrvHeap.Get(), m_samplerHeap.Get(), m_cbvSrvDescriptorSize);
+    m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+    ID3D12DescriptorHeap* ppHeaps[] = { m_cbvSrvHeap.Get(), m_samplerHeap.Get() };
+    m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+
+    CD3DX12_GPU_DESCRIPTOR_HANDLE lightCbvHandle(m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart());
+    m_commandList->SetGraphicsRootDescriptorTable(0, lightCbvHandle);
+
+    m_pModel->Draw(m_commandList.Get(), m_cbvSrvHeap.Get(), m_samplerHeap.Get(), LightCount, m_cbvSrvDescriptorSize);
 
     m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
     ThrowIfFailed(m_commandList->Close());
@@ -369,6 +383,7 @@ void ModelViewer::OnDestroy()
 
     CloseHandle(m_fenceEvent);
 
+    delete m_pLight;
     delete m_pModel;
 }
 

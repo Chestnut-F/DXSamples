@@ -24,6 +24,7 @@ public:
     void Update(float elapsedSeconds);
     XMMATRIX GetViewMatrix();
     XMMATRIX GetProjectionMatrix(float fov, float aspectRatio, float nearPlane = 1.0f, float farPlane = 1000.0f);
+    XMFLOAT3 GetPosition();
     void SetMoveSpeed(float unitsPerSecond);
     void SetTurnSpeed(float radiansPerSecond);
 

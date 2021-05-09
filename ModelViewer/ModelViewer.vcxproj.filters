@@ -48,6 +48,9 @@
     <ClInclude Include="GltfHelper.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="Light.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DXSample.cpp">
@@ -74,6 +77,9 @@
     <ClCompile Include="GltfHelper.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="Light.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="VertexShader.hlsl">
@@ -82,5 +88,10 @@
     <FxCompile Include="PixelShader.hlsl">
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="LightingUtil.hlsli">
+      <Filter>资源文件\Shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>

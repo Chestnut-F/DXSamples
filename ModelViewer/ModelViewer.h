@@ -1,6 +1,7 @@
 #pragma once
 #include "DXSample.h"
 #include "Model.h"
+#include "Light.h"
 #include "SimpleCamera.h"
 #include "StepTimer.h"
 
@@ -18,8 +19,10 @@ public:
     virtual void OnKeyUp(UINT8 key);
 private:
     static const UINT FrameCount = 2;
+    static const UINT LightCount = 1;
 
     DXModel* m_pModel;
+    DXLight* m_pLight;
 
     // Pipeline objects.
     CD3DX12_VIEWPORT m_viewport;

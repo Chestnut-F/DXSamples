@@ -16,9 +16,10 @@ DXMaterial::~DXMaterial()
 {
 }
 
-void DXMaterial::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize)
+void DXMaterial::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, INT offetInPrimitives, UINT cbvSrvDescriptorSize)
 {
-    materialCbvOffset = offetInPrimitives * 3 + 1;
+    materialCbvOffset = offsetInHeap + offetInPrimitives * 3 + 1;
     MaterialConstantBuffer materialConstantBuffer;
     materialConstantBuffer.BaseColorFactor = baseColorFactor;
     {
@@ -34,12 +35,12 @@ void DXMaterial::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* command
 
         NAME_D3D12_OBJECT(constantBuffer);
 
-        CD3DX12_CPU_DESCRIPTOR_HANDLE transformCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset, cbvSrvDescriptorSize);
+        CD3DX12_CPU_DESCRIPTOR_HANDLE globalCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset, cbvSrvDescriptorSize);
 
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
         cbvDesc.BufferLocation = constantBuffer->GetGPUVirtualAddress();
         cbvDesc.SizeInBytes = sizeof(MaterialConstantBuffer);
-        device->CreateConstantBufferView(&cbvDesc, transformCbvHandle);
+        device->CreateConstantBufferView(&cbvDesc, globalCbvHandle);
 
         // Map and initialize the constant buffer. We don't unmap this until the
         // app closes. Keeping things mapped for the lifetime of the resource is okay.
@@ -49,7 +50,7 @@ void DXMaterial::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* command
         constantBuffer->Unmap(0, 0);
     }
 
-    baseColorTextureViewOffset = offetInPrimitives * 3 + 2;
+    baseColorTextureViewOffset = offsetInHeap + offetInPrimitives * 3 + 2;
     //Upload base color texture.
     if (baseColorImage != nullptr)
     {
@@ -128,7 +129,8 @@ DXPrimitive::~DXPrimitive()
 {
 }
 
-void DXPrimitive::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize)
+void DXPrimitive::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, INT offetInPrimitives, UINT cbvSrvDescriptorSize)
 {
     {
         UINT vertexDataSize = static_cast<UINT>(vertices.size() * sizeof(GltfHelper::Vertex));
@@ -203,9 +205,9 @@ void DXPrimitive::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* comman
         numIndices = indexDataSize / 4;    // R32_UINT (SampleAssets::StandardIndexFormat) = 4 bytes each.
     }
     
-    transformCbvOffset = offetInPrimitives * 3 + 0;
+    globalCbvOffset = offsetInHeap + offetInPrimitives * 3 + 0;
     {
-        const UINT constantBufferSize = sizeof(TransformConstantBuffer);    // CB size is required to be 256-byte aligned.
+        const UINT constantBufferSize = sizeof(GlobalConstantBuffer);    // CB size is required to be 256-byte aligned.
 
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
@@ -217,44 +219,40 @@ void DXPrimitive::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* comman
 
         NAME_D3D12_OBJECT(constantBuffer);
 
-        CD3DX12_CPU_DESCRIPTOR_HANDLE transformCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), transformCbvOffset, cbvSrvDescriptorSize);
+        CD3DX12_CPU_DESCRIPTOR_HANDLE globalCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), globalCbvOffset, cbvSrvDescriptorSize);
 
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
         cbvDesc.BufferLocation = constantBuffer->GetGPUVirtualAddress();
-        cbvDesc.SizeInBytes = sizeof(TransformConstantBuffer);
-        device->CreateConstantBufferView(&cbvDesc, transformCbvHandle);
+        cbvDesc.SizeInBytes = sizeof(GlobalConstantBuffer);
+        device->CreateConstantBufferView(&cbvDesc, globalCbvHandle);
 
         // Map and initialize the constant buffer. We don't unmap this until the
         // app closes. Keeping things mapped for the lifetime of the resource is okay.
         CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-        ThrowIfFailed(constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pTransformCbvDataBegin)));
+        ThrowIfFailed(constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pGlobalCbvDataBegin)));
     }
 
-    pMaterial->Upload(device, commandList, cbvSrvHeap, offetInPrimitives, cbvSrvDescriptorSize);
+    pMaterial->Upload(device, commandList, cbvSrvHeap, offsetInHeap, offetInPrimitives, cbvSrvDescriptorSize);
 }
 
-void DXPrimitive::Transform(XMMATRIX view, XMMATRIX proj)
+void DXPrimitive::Update(XMFLOAT3 eyePosW, XMMATRIX view, XMMATRIX proj)
 {
-    TransformConstantBuffer transformConstantBuffer;
     XMMATRIX mod = XMLoadFloat4x4(&localTransform);
-    XMStoreFloat4x4(&transformConstantBuffer.ModelViewProj, XMMatrixTranspose(mod * view * proj));
-    memcpy(pTransformCbvDataBegin, &transformConstantBuffer, sizeof(TransformConstantBuffer));
+    globalConstantBuffer.EyePosW = eyePosW;
+    XMStoreFloat4x4(&globalConstantBuffer.ModelViewProj, XMMatrixTranspose(mod * view * proj));
+    memcpy(pGlobalCbvDataBegin, &globalConstantBuffer, sizeof(GlobalConstantBuffer));
 }
 
-void DXPrimitive::Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature,
-    ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize)
+void DXPrimitive::Draw(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 
+    ID3D12DescriptorHeap* samplerHeap, INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize)
 {
-    commandList->SetGraphicsRootSignature(rootSignature);
-
-    ID3D12DescriptorHeap* ppHeaps[] = { cbvSrvHeap, samplerHeap };
-    commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
     commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     commandList->IASetIndexBuffer(&indexBufferView);
     commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), transformCbvOffset, cbvSrvDescriptorSize);
-    commandList->SetGraphicsRootDescriptorTable(0, cbvSrvHandle);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), globalCbvOffset, cbvSrvDescriptorSize);
+    commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable, cbvSrvHandle);
 
-    pMaterial->Draw(commandList, cbvSrvHeap, 1, cbvSrvDescriptorSize);
+    pMaterial->Draw(commandList, cbvSrvHeap, offsetInRootDescriptorTable + 1, cbvSrvDescriptorSize);
 
     commandList->DrawIndexedInstanced(numIndices, 1, 0, 0, 0);
 }
@@ -273,28 +271,29 @@ DXMesh::DXMesh(const tinygltf::Model& model, const tinygltf::Node& node, const t
     primitiveSize = static_cast<UINT>(primitives.size());
 }
 
-void DXMesh::Transform(XMMATRIX view, XMMATRIX proj)
+void DXMesh::Update(XMFLOAT3 eyePosW, XMMATRIX view, XMMATRIX proj)
 {
     for (UINT i = 0; i < primitiveSize; ++i)
     {
-        primitives[i].Transform(view, proj);
+        primitives[i].Update(eyePosW, view, proj);
     }
 }
 
-void DXMesh::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize)
+void DXMesh::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, INT offetInPrimitives, UINT cbvSrvDescriptorSize)
 {
     for (UINT i = 0; i < primitiveSize; ++i)
     {
-        primitives[i].Upload(device, commandList, cbvSrvHeap, offetInPrimitives + i, cbvSrvDescriptorSize);
+        primitives[i].Upload(device, commandList, cbvSrvHeap, offsetInHeap, offetInPrimitives + i, cbvSrvDescriptorSize);
     }
 }
 
-void DXMesh::Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature, 
-    ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize)
+void DXMesh::Draw(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 
+    ID3D12DescriptorHeap* samplerHeap, INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize)
 {
     for (UINT i = 0; i < primitiveSize; ++i)
     {
-        primitives[i].Draw(commandList, rootSignature, cbvSrvHeap, samplerHeap, cbvSrvDescriptorSize);
+        primitives[i].Draw(commandList, cbvSrvHeap, samplerHeap, offsetInRootDescriptorTable, cbvSrvDescriptorSize);
     }
 }
 
@@ -355,29 +354,30 @@ void DXModel::ProcessMesh(const tinygltf::Node& node, const tinygltf::Mesh& mesh
     primitiveSize += dxMesh.primitiveSize;
 }
 
-void DXModel::Transform(XMMATRIX view, XMMATRIX proj)
+void DXModel::Update(XMFLOAT3 eyePosW, XMMATRIX view, XMMATRIX proj)
 {
     for (UINT i = 0; i < meshSize; ++i)
     {
-        meshes[i].Transform(view, proj);
+        meshes[i].Update(eyePosW, view, proj);
     }
 }
 
-void DXModel::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT cbvSrvDescriptorSize)
+void DXModel::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize)
 {
     UINT offetInPrimitives = 0;
     for (UINT i = 0; i < meshSize; ++i)
     {
-        meshes[i].Upload(device, commandList, cbvSrvHeap, offetInPrimitives, cbvSrvDescriptorSize);
+        meshes[i].Upload(device, commandList, cbvSrvHeap, offsetInHeap, offetInPrimitives, cbvSrvDescriptorSize);
         offetInPrimitives += meshes[i].primitiveSize;
     }
 }
 
-void DXModel::Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature, 
-    ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize)
+void DXModel::Draw(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 
+    ID3D12DescriptorHeap* samplerHeap, INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize)
 {
     for (UINT i = 0; i < meshSize; ++i)
     {
-        meshes[i].Draw(commandList, rootSignature, cbvSrvHeap, samplerHeap, cbvSrvDescriptorSize);
+        meshes[i].Draw(commandList, cbvSrvHeap, samplerHeap, offsetInRootDescriptorTable, cbvSrvDescriptorSize);
     }
 }
