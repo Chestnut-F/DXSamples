@@ -85,8 +85,8 @@ void SimpleCamera::Update(float elapsedSeconds)
         m_pitch -= rotateInterval;
 
     // Prevent looking too far up or down.
-    m_pitch = min(m_pitch, XM_PIDIV4);
-    m_pitch = max(-XM_PIDIV4, m_pitch);
+    m_pitch = min(m_pitch, XM_PIDIV2);
+    m_pitch = max(-XM_PIDIV2, m_pitch);
 
     // Move the camera in model space.
     float x = move.x * cosf(m_yaw) - move.z * sinf(m_yaw);

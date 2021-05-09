@@ -16,8 +16,9 @@ static_assert((sizeof(MaterialConstantBuffer) % 256) == 0, "Constant Buffer size
 struct GlobalConstantBuffer
 {
 	XMFLOAT4X4 ModelViewProj;
+	XMFLOAT4X4 Model;
 	XMFLOAT3 EyePosW;
-	float padding[45]; // Padding so the constant buffer is 256-byte aligned.
+	float padding[29]; // Padding so the constant buffer is 256-byte aligned.
 };
 static_assert((sizeof(GlobalConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 

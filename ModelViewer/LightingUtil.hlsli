@@ -18,17 +18,14 @@ float CalcAttenuation(float d, float radius)
 	return saturate((radius - d) / radius);
 }
 
-float3 BlinnPhong(float3 lightColor, float3 toLight, float3 normal, float3 toEye, Material mat)
+float3 BlinnPhong(float3 lightStrength, float3 lightVec, float3 normal, float3 toEye, Material mat)
 {
-    float p = 64;
-    float ks = 1;
+    const float m = 1.0f;
+    float3 halfVec = normalize(toEye + lightVec);
 
-    float3 halfVec = normalize(toEye + toLight);
+    float roughnessFactor = (m + 8.0f) * pow(max(dot(halfVec, normal), 0.0f), m) / 8.0f;
 
-    float3 Ld = mat.diffuseFactor * lightColor;
-    float3 Ls = ks * pow(max(0, dot(normal, halfVec)), p) * lightColor;
-
-    return Ld + Ls;
+    return (mat.diffuseFactor.rgb + roughnessFactor) * lightStrength;
 }
 
 //---------------------------------------------------------------------------------------

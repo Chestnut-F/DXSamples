@@ -239,6 +239,7 @@ void DXPrimitive::Update(XMFLOAT3 eyePosW, XMMATRIX view, XMMATRIX proj)
 {
     XMMATRIX mod = XMLoadFloat4x4(&localTransform);
     globalConstantBuffer.EyePosW = eyePosW;
+    XMStoreFloat4x4(&globalConstantBuffer.Model, XMMatrixTranspose(mod));
     XMStoreFloat4x4(&globalConstantBuffer.ModelViewProj, XMMatrixTranspose(mod * view * proj));
     memcpy(pGlobalCbvDataBegin, &globalConstantBuffer, sizeof(GlobalConstantBuffer));
 }

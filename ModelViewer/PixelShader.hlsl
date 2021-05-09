@@ -8,6 +8,7 @@ cbuffer g_light : register(b0)
 cbuffer g_constant : register(b1)
 {
     float4x4 gWorldViewProj;
+    float4x4 gWorld;
     float3 gEyePosW;
 };
 

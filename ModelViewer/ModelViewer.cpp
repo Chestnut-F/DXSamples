@@ -12,11 +12,11 @@ ModelViewer::ModelViewer(UINT width, UINT height, std::wstring name):
 
 void ModelViewer::OnInit()
 {
-    m_camera.Init({ 0, 1, 0 });
-    m_camera.SetMoveSpeed(20.0f);
+    m_camera.Init({ 200, 500, 200 });
+    m_camera.SetMoveSpeed(100.0f);
     m_camera.SetTurnSpeed(XM_PI);
 
-    m_pLight = new DXLight({ 1.f, 1.f, 1.f }, 10000.f, { 0.f, 100.f, 0.f });
+    m_pLight = new DXLight({ 1.f, 1.f, 1.f }, 2000.f, { 300.f, 300.f, 300.f });
 
     InitDevice();
     CreateDescriptorHeaps();
@@ -289,7 +289,7 @@ void ModelViewer::CreatePipelineState()
 
 void ModelViewer::LoadAssets()
 {
-    std::wstring ws_assetFullPath = GetAssetFullPath(L"..\\..\\models\\Sponza\\Sponza.gltf");
+    std::wstring ws_assetFullPath = GetAssetFullPath(L"..\\..\\models\\Duck\\Duck.gltf");
     using convert_typeX = std::codecvt_utf8<wchar_t>;
     std::wstring_convert<convert_typeX, wchar_t> converterX;
     std::string s_assetFullPath(converterX.to_bytes(ws_assetFullPath));
