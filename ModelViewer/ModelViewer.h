@@ -1,7 +1,7 @@
 #pragma once
 #include "DXSample.h"
 #include "Model.h"
-#include "SimpleCamera.h"
+#include "Camera.h"
 #include "StepTimer.h"
 
 class ModelViewer : public DXSample
@@ -19,7 +19,7 @@ public:
 private:
     static const UINT FrameCount = 2;
 
-    DXModel* m_pModel;
+    std::unique_ptr<DXModel> m_pModel;
 
     // Pipeline objects.
     CD3DX12_VIEWPORT m_viewport;
@@ -45,7 +45,7 @@ private:
     // App resources.
     UINT m_frameCounter;
     StepTimer m_timer;
-    SimpleCamera m_camera;
+    std::unique_ptr<DXCamera> m_pCamera;
 
     // Synchronization objects.
     UINT m_frameIndex;

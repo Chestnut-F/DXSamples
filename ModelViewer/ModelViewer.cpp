@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "ModelViewer.h"
-#include <tiny_gltf.h>
 
 ModelViewer::ModelViewer(UINT width, UINT height, std::wstring name):
 	DXSample(width, height, name),
@@ -12,9 +11,7 @@ ModelViewer::ModelViewer(UINT width, UINT height, std::wstring name):
 
 void ModelViewer::OnInit()
 {
-    m_camera.Init({ 0, 1, 0 });
-    m_camera.SetMoveSpeed(5.0f);
-    m_camera.SetTurnSpeed(XM_PIDIV2);
+    m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 0.0f, 1.0f, 0.0f }), XMVECTOR({ 0.0f, 0.0f, 1.0f }));
 
     InitDevice();
     CreateDescriptorHeaps();
@@ -290,7 +287,7 @@ void ModelViewer::LoadAssets()
     std::wstring_convert<convert_typeX, wchar_t> converterX;
     std::string s_assetFullPath(converterX.to_bytes(ws_assetFullPath));
 
-    m_pModel = new DXModel(s_assetFullPath);
+    m_pModel = std::make_unique<DXModel>(s_assetFullPath);
 
     D3D12_DESCRIPTOR_HEAP_DESC cbvSrvHeapDesc = {};
     cbvSrvHeapDesc.NumDescriptors = m_pModel->primitiveSize * 3;
@@ -319,9 +316,9 @@ void ModelViewer::OnUpdate()
 
     m_frameCounter++;
 
-    m_camera.Update(static_cast<float>(m_timer.GetElapsedSeconds()));
-    XMMATRIX view = m_camera.GetViewMatrix();
-    XMMATRIX proj = m_camera.GetProjectionMatrix(XM_PI / 3.0f, m_aspectRatio);
+    m_pCamera->Update(static_cast<float>(m_timer.GetElapsedSeconds()));
+    XMMATRIX view = m_pCamera->GetViewMatrix();
+    XMMATRIX proj = m_pCamera->GetProjectionMatrix(XM_PI / 3.0f, m_aspectRatio);
 
     m_pModel->Transform(view, proj);
 }
@@ -368,18 +365,16 @@ void ModelViewer::OnDestroy()
     WaitForPreviousFrame();
 
     CloseHandle(m_fenceEvent);
-
-    delete m_pModel;
 }
 
 void ModelViewer::OnKeyDown(UINT8 key)
 {
-    m_camera.OnKeyDown(key);
+    m_pCamera->OnKeyDown(key);
 }
 
 void ModelViewer::OnKeyUp(UINT8 key)
 {
-    m_camera.OnKeyUp(key);
+    m_pCamera->OnKeyUp(key);
 }
 
 void ModelViewer::WaitForPreviousFrame()
