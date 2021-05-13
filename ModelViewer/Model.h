@@ -9,83 +9,83 @@ using Microsoft::WRL::ComPtr;
 struct MaterialConstantBuffer
 {
 	XMFLOAT4 BaseColorFactor;
-	float padding[60]; // Padding so the constant buffer is 256-byte aligned.
+	float MetallicFactor;
+	float RoughnessFactor;
+	float NormalScale;
+	float OcclusionStrength;
+	XMFLOAT3 EmissiveFactor;
+	float padding[53]; // Padding so the constant buffer is 256-byte aligned.
 };
 static_assert((sizeof(MaterialConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 
-struct TransformConstantBuffer
+struct PrimitiveConstantBuffer
 {
-	XMFLOAT4X4 ModelViewProj;
+	XMFLOAT4X4 Model;
 	float padding[48]; // Padding so the constant buffer is 256-byte aligned.
 };
-static_assert((sizeof(TransformConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
+static_assert((sizeof(PrimitiveConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 
 class DXMaterial
 {
 public:
-	DXMaterial(const tinygltf::Model& model, const tinygltf::Material material);
+	DXMaterial(std::shared_ptr<tinygltf::Model> model, const tinygltf::Material& material);
 	~DXMaterial();
-	void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize);
-	void Draw(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInDescriptors, UINT cbvSrvDescriptorSize);
+	void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+		ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize);
+	void Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 
+		ID3D12DescriptorHeap* samplerHeap, INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize);
 private:
-	const tinygltf::Model* pModel;
+	std::shared_ptr<tinygltf::Model> pModel;
 
 	const tinygltf::Image* baseColorImage;
-	//const tinygltf::Image* metallicRoughnessImage;
-	//const tinygltf::Image* emissiveImage;
-	//const tinygltf::Image* normalImage;
-	//const tinygltf::Image* occlusionImage;
-
-	DirectX::XMFLOAT4 baseColorFactor;
-	//float metallicFactor;
-	//float roughnessFactor;
-	//DirectX::XMFLOAT3 emissiveFactor;
-
-	//float normalScale;
-	//float occlusionStrength;
+	const tinygltf::Image* metallicRoughnessImage;
+	const tinygltf::Image* emissiveImage;
+	const tinygltf::Image* normalImage;
+	const tinygltf::Image* occlusionImage;
+	MaterialConstantBuffer materialConstant;
 
 	UINT materialCbvOffset;
 	ComPtr<ID3D12Resource> constantBuffer;
 	UINT8* pMaterialCbvDataBegin;
 
-	UINT baseColorTextureViewOffset;
-	//UINT metallicRoughnessViewOffset;
-	//UINT emissiveTextureViewOffset;
-	//UINT normalTextureViewOffset;
-	//UINT occlusionTextureViewOffset;
-
 	ComPtr<ID3D12Resource> baseColorTexture;
-	//ComPtr<ID3D12Resource> metallicRoughnessTexture;
-	//ComPtr<ID3D12Resource> emissiveTexture;
-	//ComPtr<ID3D12Resource> normalTexture;
-	//ComPtr<ID3D12Resource> occlusionTexture;
+	ComPtr<ID3D12Resource> metallicRoughnessTexture;
+	ComPtr<ID3D12Resource> emissiveTexture;
+	ComPtr<ID3D12Resource> normalTexture;
+	ComPtr<ID3D12Resource> occlusionTexture;
 
 	ComPtr<ID3D12Resource> baseColorTextureUploadHeap;
-	//ComPtr<ID3D12Resource> metallicRoughnessTextureUploadHeap;
-	//ComPtr<ID3D12Resource> emissiveTextureUploadHeap;
-	//ComPtr<ID3D12Resource> normalTextureUploadHeap;
-	//ComPtr<ID3D12Resource> occlusionTextureUploadHeap;
+	ComPtr<ID3D12Resource> metallicRoughnessTextureUploadHeap;
+	ComPtr<ID3D12Resource> emissiveTextureUploadHeap;
+	ComPtr<ID3D12Resource> normalTextureUploadHeap;
+	ComPtr<ID3D12Resource> occlusionTextureUploadHeap;
+
+	void UploadImage(ID3D12Device* device, ID3D12GraphicsCommandList* commandList,
+		ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInMaterial, UINT cbvSrvDescriptorSize,
+		const tinygltf::Image* image, ID3D12Resource* texture, ID3D12Resource* uploadHeap);
 };
 
 class DXPrimitive
 {
 public:
-	DXPrimitive(const tinygltf::Model& model, const tinygltf::Primitive& primitive, XMMATRIX localTransform);
+	DXPrimitive(std::shared_ptr<tinygltf::Model> model, 
+		const tinygltf::Primitive& primitive, XMMATRIX localTransform);
 	~DXPrimitive();
-	void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize);
-	void Transform(XMMATRIX view, XMMATRIX proj);
-	void Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature,
-		ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize);
+	void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList,
+		ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize);
+	void Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap,
+		INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize, DXMaterial* material);
+
+	UINT indexMaterial;
 private:
-	const tinygltf::Model* pModel;
+	std::shared_ptr<tinygltf::Model> pModel;
 	std::vector<GltfHelper::Vertex> vertices;
 	std::vector<UINT> indices;
-	std::shared_ptr<DXMaterial> pMaterial;
+	PrimitiveConstantBuffer primitiveConstant;
 
-	UINT transformCbvOffset;
-	XMFLOAT4X4 localTransform;
-	UINT8* pTransformCbvDataBegin;
-
+	UINT primitiveCbvOffset;
+	UINT8* pPrimitiveCbvDataBegin;
+	
 	UINT numIndices;
 	ComPtr<ID3D12Resource> vertexBuffer;
 	ComPtr<ID3D12Resource> indexBuffer;
@@ -96,38 +96,26 @@ private:
 	ComPtr<ID3D12Resource> constantBuffer;
 };
 
-class DXMesh
-{
-public:
-	DXMesh(const tinygltf::Model& model, const tinygltf::Node& node, const tinygltf::Mesh& mesh);
-	void Transform(XMMATRIX view, XMMATRIX proj);
-	void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize);
-	void Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature,
-		ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize);
-
-	std::vector<DXPrimitive> primitives;
-	UINT primitiveSize;
-private:
-	const tinygltf::Model* pModel;
-};
-
 class DXModel
 {
 public:
 	DXModel(const std::string& assetFullPath);
 	~DXModel();
-	void Transform(XMMATRIX view, XMMATRIX proj);
-	void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT cbvSrvDescriptorSize);
-	void Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature,
-		ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize);
+	void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+		ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize);
+	void Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap,
+		ID3D12DescriptorHeap* samplerHeap, INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize);
 
-	std::vector<DXMesh> meshes;
 	UINT meshSize;
 	UINT primitiveSize;
+	UINT materialSize;
 private:
-	tinygltf::Model* pModel;
+	std::shared_ptr<tinygltf::Model> pModel;
+	std::vector<DXPrimitive> primitives;
+	std::vector<DXMaterial> materials;
 
 	void ProcessModel();
 	void ProcessNode(const tinygltf::Node& node);
 	void ProcessMesh(const tinygltf::Node& node, const tinygltf::Mesh& mesh);
+	void ProcessMaterial();
 };

@@ -12,6 +12,7 @@ ModelViewer::ModelViewer(UINT width, UINT height, std::wstring name):
 void ModelViewer::OnInit()
 {
     m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 0.0f, 1.0f, 0.0f }), XMVECTOR({ 0.0f, 0.0f, 1.0f }));
+    m_pLight = std::make_unique<DXLight>(XMFLOAT3({ 0.0f, 100.0f, 0.0f }), 2000.0f);
 
     InitDevice();
     CreateDescriptorHeaps();
@@ -201,15 +202,27 @@ void ModelViewer::CreateRootSignature()
         featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
     }
 
-    CD3DX12_DESCRIPTOR_RANGE1 ranges[3];
+    CD3DX12_DESCRIPTOR_RANGE1 ranges[9];
     ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
     ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 1, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-    ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 2, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 3, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[4].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+    ranges[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 4, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
 
-    CD3DX12_ROOT_PARAMETER1 rootParameters[3];
-    rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
-    rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
-    rootParameters[2].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_PIXEL);
+    CD3DX12_ROOT_PARAMETER1 rootParameters[9];
+    rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_ALL);
+    rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_ALL);
+    rootParameters[2].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_ALL);
+    rootParameters[3].InitAsDescriptorTable(1, &ranges[3], D3D12_SHADER_VISIBILITY_ALL);
+    rootParameters[4].InitAsDescriptorTable(1, &ranges[4], D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[5].InitAsDescriptorTable(1, &ranges[5], D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[6].InitAsDescriptorTable(1, &ranges[6], D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[7].InitAsDescriptorTable(1, &ranges[7], D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[8].InitAsDescriptorTable(1, &ranges[8], D3D12_SHADER_VISIBILITY_PIXEL);
 
     D3D12_STATIC_SAMPLER_DESC sampler = {};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -290,7 +303,7 @@ void ModelViewer::LoadAssets()
     m_pModel = std::make_unique<DXModel>(s_assetFullPath);
 
     D3D12_DESCRIPTOR_HEAP_DESC cbvSrvHeapDesc = {};
-    cbvSrvHeapDesc.NumDescriptors = m_pModel->primitiveSize * 3;
+    cbvSrvHeapDesc.NumDescriptors = 1 + 1 + m_pModel->primitiveSize + (m_pModel->materialSize * 6);
     cbvSrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     cbvSrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvSrvHeapDesc, IID_PPV_ARGS(&m_cbvSrvHeap)));
@@ -298,7 +311,11 @@ void ModelViewer::LoadAssets()
 
     m_cbvSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    m_pModel->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), m_cbvSrvDescriptorSize);
+    
+    m_pCamera->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), 0, m_cbvSrvDescriptorSize);
+    m_pLight->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), 1, m_cbvSrvDescriptorSize);
+
+    m_pModel->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), 2, m_cbvSrvDescriptorSize);
 }
 
 void ModelViewer::OnUpdate()
@@ -316,11 +333,8 @@ void ModelViewer::OnUpdate()
 
     m_frameCounter++;
 
-    m_pCamera->Update(static_cast<float>(m_timer.GetElapsedSeconds()));
-    XMMATRIX view = m_pCamera->GetViewMatrix();
-    XMMATRIX proj = m_pCamera->GetProjectionMatrix(XM_PI / 3.0f, m_aspectRatio);
-
-    m_pModel->Transform(view, proj);
+    m_pCamera->Update(static_cast<float>(m_timer.GetElapsedSeconds()), XM_PI / 3.0f, m_aspectRatio);
+    m_pLight->Update();
 }
 
 void ModelViewer::OnRender()
@@ -354,7 +368,13 @@ void ModelViewer::PopulateCommandList()
     m_commandList->ClearDepthStencilView(m_dsvHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
     m_commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
 
-    m_pModel->Draw(m_commandList.Get(), m_rootSignature.Get(), m_cbvSrvHeap.Get(), m_samplerHeap.Get(), m_cbvSrvDescriptorSize);
+    m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+    ID3D12DescriptorHeap* ppHeaps[] = { m_cbvSrvHeap.Get(), m_samplerHeap.Get() };
+    m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+
+    m_pCamera->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), 0, m_cbvSrvDescriptorSize);
+    m_pLight->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), 1, m_cbvSrvDescriptorSize);
+    m_pModel->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), m_samplerHeap.Get(), 2, m_cbvSrvDescriptorSize);
 
     m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
     ThrowIfFailed(m_commandList->Close());

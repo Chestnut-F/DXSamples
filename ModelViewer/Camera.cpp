@@ -19,7 +19,7 @@ DXCamera::DXCamera(XMVECTOR pos, XMVECTOR lookDir, XMVECTOR up):
     pitch = max(-XM_PIDIV4, pitch);
 }
 
-void DXCamera::Update(float elapsedSeconds)
+void DXCamera::Update(float elapsedSeconds, float fov, float aspectRatio, float nearPlane, float farPlane)
 {
     XMFLOAT3 move(0, 0, 0);
 
@@ -66,6 +66,50 @@ void DXCamera::Update(float elapsedSeconds)
     lookDirection.x = cosf(pitch) * -sinf(yaw);
     lookDirection.y = sinf(pitch);
     lookDirection.z = cosf(pitch) * cosf(yaw);
+
+    cameraConstantBuffer.EyePosW = position;
+    XMMATRIX view = XMMatrixLookToLH(XMLoadFloat3(&position), XMLoadFloat3(&lookDirection), XMLoadFloat3(&upDirection));
+    XMMATRIX proj = XMMatrixPerspectiveFovLH(fov, aspectRatio, nearPlane, farPlane);
+    XMStoreFloat4x4(&cameraConstantBuffer.View, XMMatrixTranspose(view));
+    XMStoreFloat4x4(&cameraConstantBuffer.Projection, XMMatrixTranspose(proj));
+    XMStoreFloat4x4(&cameraConstantBuffer.ViewProjection, XMMatrixTranspose(view * proj));
+    memcpy(pCameraCbvDataBegin, &cameraConstantBuffer, sizeof(CameraConstantBuffer));
+}
+
+void DXCamera::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize)
+{
+    cameraCbvOffset = offsetInHeap;
+    const UINT constantBufferSize = sizeof(CameraConstantBuffer);    // CB size is required to be 256-byte aligned.
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&constantBuffer)));
+
+    NAME_D3D12_OBJECT(constantBuffer);
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cameraCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), cameraCbvOffset, cbvSrvDescriptorSize);
+
+    D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+    cbvDesc.BufferLocation = constantBuffer->GetGPUVirtualAddress();
+    cbvDesc.SizeInBytes = constantBufferSize;
+    device->CreateConstantBufferView(&cbvDesc, cameraCbvHandle);
+
+    // Map and initialize the constant buffer. We don't unmap this until the
+    // app closes. Keeping things mapped for the lifetime of the resource is okay.
+    CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
+    ThrowIfFailed(constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pCameraCbvDataBegin)));
+}
+
+void DXCamera::Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 
+    INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize)
+{
+    CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), cameraCbvOffset, cbvSrvDescriptorSize);
+    commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable, cbvSrvHandle);
 }
 
 XMVECTOR DXCamera::GetPosition()

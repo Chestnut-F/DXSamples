@@ -2,6 +2,7 @@
 #include "DXSample.h"
 #include "Model.h"
 #include "Camera.h"
+#include "Light.h"
 #include "StepTimer.h"
 
 class ModelViewer : public DXSample
@@ -20,6 +21,8 @@ private:
     static const UINT FrameCount = 2;
 
     std::unique_ptr<DXModel> m_pModel;
+    std::unique_ptr<DXCamera> m_pCamera;
+    std::unique_ptr<DXLight> m_pLight;
 
     // Pipeline objects.
     CD3DX12_VIEWPORT m_viewport;
@@ -45,7 +48,6 @@ private:
     // App resources.
     UINT m_frameCounter;
     StepTimer m_timer;
-    std::unique_ptr<DXCamera> m_pCamera;
 
     // Synchronization objects.
     UINT m_frameIndex;

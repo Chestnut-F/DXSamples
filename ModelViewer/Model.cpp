@@ -1,26 +1,43 @@
 #include "stdafx.h"
 #include "Model.h"
 
-DXMaterial::DXMaterial(const tinygltf::Model& model, const tinygltf::Material material)
+DXMaterial::DXMaterial(std::shared_ptr<tinygltf::Model> model, const tinygltf::Material& material):
+    baseColorImage(nullptr),
+    metallicRoughnessImage(nullptr),
+    emissiveImage(nullptr),
+    normalImage(nullptr),
+    occlusionImage(nullptr)
 {
-    this->pModel = &model;
-    GltfHelper::Material gltfHelperMaterial = GltfHelper::ReadMaterial(model, material);
-    baseColorFactor = gltfHelperMaterial.BaseColorFactor;
-    if (gltfHelperMaterial.BaseColorTexture.Image)
-    {
+    this->pModel = model;
+    GltfHelper::Material gltfHelperMaterial = GltfHelper::ReadMaterial(*model, material);
+
+    materialConstant.BaseColorFactor = gltfHelperMaterial.BaseColorFactor;
+    materialConstant.EmissiveFactor = gltfHelperMaterial.EmissiveFactor;
+    materialConstant.MetallicFactor = gltfHelperMaterial.MetallicFactor;
+    materialConstant.NormalScale = gltfHelperMaterial.NormalScale;
+    materialConstant.OcclusionStrength = gltfHelperMaterial.OcclusionStrength;
+    materialConstant.RoughnessFactor = gltfHelperMaterial.RoughnessFactor;
+
+    if (gltfHelperMaterial.BaseColorTexture.Image != nullptr)
         baseColorImage = gltfHelperMaterial.BaseColorTexture.Image;
-    }
+    if (gltfHelperMaterial.MetallicRoughnessTexture.Image != nullptr)
+        metallicRoughnessImage = gltfHelperMaterial.MetallicRoughnessTexture.Image;
+    if (gltfHelperMaterial.EmissiveTexture.Image != nullptr)
+        emissiveImage = gltfHelperMaterial.EmissiveTexture.Image;
+    if (gltfHelperMaterial.NormalTexture.Image != nullptr)
+        normalImage = gltfHelperMaterial.NormalTexture.Image;
+    if (gltfHelperMaterial.OcclusionTexture.Image != nullptr)
+        occlusionImage = gltfHelperMaterial.OcclusionTexture.Image;
 }
 
 DXMaterial::~DXMaterial()
 {
 }
 
-void DXMaterial::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize)
+void DXMaterial::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize)
 {
-    materialCbvOffset = offetInPrimitives * 3 + 1;
-    MaterialConstantBuffer materialConstantBuffer;
-    materialConstantBuffer.BaseColorFactor = baseColorFactor;
+    materialCbvOffset = offsetInHeap;
     {
         const UINT constantBufferSize = sizeof(MaterialConstantBuffer);    // CB size is required to be 256-byte aligned.
 
@@ -34,101 +51,151 @@ void DXMaterial::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* command
 
         NAME_D3D12_OBJECT(constantBuffer);
 
-        CD3DX12_CPU_DESCRIPTOR_HANDLE transformCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset, cbvSrvDescriptorSize);
+        CD3DX12_CPU_DESCRIPTOR_HANDLE materialCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset, cbvSrvDescriptorSize);
 
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
         cbvDesc.BufferLocation = constantBuffer->GetGPUVirtualAddress();
         cbvDesc.SizeInBytes = sizeof(MaterialConstantBuffer);
-        device->CreateConstantBufferView(&cbvDesc, transformCbvHandle);
+        device->CreateConstantBufferView(&cbvDesc, materialCbvHandle);
 
         // Map and initialize the constant buffer. We don't unmap this until the
         // app closes. Keeping things mapped for the lifetime of the resource is okay.
         CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
         ThrowIfFailed(constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pMaterialCbvDataBegin)));
-        memcpy(pMaterialCbvDataBegin, &materialConstantBuffer, sizeof(MaterialConstantBuffer));
+        memcpy(pMaterialCbvDataBegin, &materialConstant, constantBufferSize);
         constantBuffer->Unmap(0, 0);
     }
 
-    baseColorTextureViewOffset = offetInPrimitives * 3 + 2;
-    //Upload base color texture.
     if (baseColorImage != nullptr)
     {
-        D3D12_RESOURCE_DESC textureDesc = {};
-        textureDesc.MipLevels = 1;
-        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        textureDesc.Width = static_cast<UINT>(baseColorImage->width);
-        textureDesc.Height = static_cast<UINT>(baseColorImage->height);
-        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-        textureDesc.DepthOrArraySize = 1;
-        textureDesc.SampleDesc.Count = 1;
-        textureDesc.SampleDesc.Quality = 0;
-        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-
-        ThrowIfFailed(device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-            D3D12_HEAP_FLAG_NONE,
-            &textureDesc,
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            nullptr,
-            IID_PPV_ARGS(&baseColorTexture)));
-
-        NAME_D3D12_OBJECT(baseColorTexture);
-
-        UINT64 uploadBufferSize = GetRequiredIntermediateSize(baseColorTexture.Get(), 0, 1);
-
-        ThrowIfFailed(device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-            D3D12_HEAP_FLAG_NONE,
-            &CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize),
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&baseColorTextureUploadHeap)));
-
-        D3D12_SUBRESOURCE_DATA textureData = {};
-        textureData.pData = baseColorImage->image.data();
-        textureData.RowPitch = static_cast<UINT>(baseColorImage->width) * (UINT)4;
-        textureData.SlicePitch = static_cast<UINT>(baseColorImage->width) * static_cast<UINT>(baseColorImage->height) * (UINT)4;
-
-        UpdateSubresources<1>(commandList, baseColorTexture.Get(), baseColorTextureUploadHeap.Get(), 0, 0, 1, &textureData);
-        commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(baseColorTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
-
-        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), baseColorTextureViewOffset, cbvSrvDescriptorSize);
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format = textureDesc.Format;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
-        device->CreateShaderResourceView(baseColorTexture.Get(), &srvDesc, srvHandle);
+        UploadImage(device, commandList, cbvSrvHeap, 1, cbvSrvDescriptorSize, 
+            baseColorImage, baseColorTexture.Get(), baseColorTextureUploadHeap.Get());
+    }
+    if (metallicRoughnessImage != nullptr)
+    {
+        UploadImage(device, commandList, cbvSrvHeap, 2, cbvSrvDescriptorSize,
+            metallicRoughnessImage, metallicRoughnessTexture.Get(), metallicRoughnessTextureUploadHeap.Get());
+    }
+    if (emissiveImage != nullptr)
+    {
+        UploadImage(device, commandList, cbvSrvHeap, 3, cbvSrvDescriptorSize,
+            emissiveImage, emissiveTexture.Get(), emissiveTextureUploadHeap.Get());
+    }
+    if (normalImage != nullptr)
+    {
+        UploadImage(device, commandList, cbvSrvHeap, 4, cbvSrvDescriptorSize,
+            normalImage, normalTexture.Get(), normalTextureUploadHeap.Get());
+    }
+    if (occlusionImage != nullptr)
+    {
+        UploadImage(device, commandList, cbvSrvHeap, 5, cbvSrvDescriptorSize,
+            occlusionImage, occlusionTexture.Get(), occlusionTextureUploadHeap.Get());
     }
 }
 
-void DXMaterial::Draw(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInDescriptors, UINT cbvSrvDescriptorSize)
+void DXMaterial::UploadImage(ID3D12Device* device, ID3D12GraphicsCommandList* commandList,
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInMaterial, UINT cbvSrvDescriptorSize,
+    const tinygltf::Image* image, ID3D12Resource* texture, ID3D12Resource* uploadHeap)
 {
-    CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), materialCbvOffset, cbvSrvDescriptorSize);
-    commandList->SetGraphicsRootDescriptorTable(offsetInDescriptors + 0, cbvSrvHandle);
-    cbvSrvHandle.Offset(1, cbvSrvDescriptorSize);
-    commandList->SetGraphicsRootDescriptorTable(offsetInDescriptors + 1, cbvSrvHandle);
+    D3D12_RESOURCE_DESC textureDesc = {};
+    textureDesc.MipLevels = 1;
+    textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    textureDesc.Width = static_cast<UINT>(image->width);
+    textureDesc.Height = static_cast<UINT>(image->height);
+    textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    textureDesc.DepthOrArraySize = 1;
+    textureDesc.SampleDesc.Count = 1;
+    textureDesc.SampleDesc.Quality = 0;
+    textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE,
+        &textureDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&texture)));
+
+    UINT64 uploadBufferSize = GetRequiredIntermediateSize(texture, 0, 1);
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&uploadHeap)));
+
+    D3D12_SUBRESOURCE_DATA textureData = {};
+    textureData.pData = image->image.data();
+    textureData.RowPitch = static_cast<UINT>(image->width) * (UINT)4;
+    textureData.SlicePitch = static_cast<UINT>(image->width) * static_cast<UINT>(image->height) * (UINT)4;
+
+    UpdateSubresources<1>(commandList, texture, uploadHeap, 0, 0, 1, &textureData);
+    commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(texture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset + offsetInMaterial, cbvSrvDescriptorSize);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = textureDesc.Format;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    device->CreateShaderResourceView(texture, &srvDesc, srvHandle);
 }
 
-DXPrimitive::DXPrimitive(const tinygltf::Model& model, const tinygltf::Primitive& primitive, XMMATRIX localTrans)
+void DXMaterial::Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 
+    ID3D12DescriptorHeap* samplerHeap, INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize)
 {
-    this->pModel = &model;
-    XMStoreFloat4x4(&this->localTransform, localTrans);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), materialCbvOffset, cbvSrvDescriptorSize);
+    commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable, cbvSrvHandle);
+    cbvSrvHandle.Offset(1, cbvSrvDescriptorSize);
+    if (baseColorImage != nullptr)
+    {
+        commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable + 1, cbvSrvHandle);
+    }
+    cbvSrvHandle.Offset(1, cbvSrvDescriptorSize);
+    if (metallicRoughnessImage != nullptr)
+    {
+        commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable + 2, cbvSrvHandle);
+    }
+    cbvSrvHandle.Offset(1, cbvSrvDescriptorSize);
+    if (emissiveImage != nullptr)
+    {
+        commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable + 3, cbvSrvHandle);
+    }
+    cbvSrvHandle.Offset(1, cbvSrvDescriptorSize);
+    if (normalImage != nullptr)
+    {
+        commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable + 4, cbvSrvHandle);
+    }
+    cbvSrvHandle.Offset(1, cbvSrvDescriptorSize);
+    if (occlusionImage != nullptr)
+    {
+        commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable + 5, cbvSrvHandle);
+    }
+}
 
-    GltfHelper::Primitive helperPrimitive = GltfHelper::ReadPrimitive(model, primitive);
+DXPrimitive::DXPrimitive(std::shared_ptr<tinygltf::Model> model, 
+    const tinygltf::Primitive& primitive, XMMATRIX localTrans)
+{
+    this->pModel = model;
+    XMStoreFloat4x4(&primitiveConstant.Model, localTrans);
+
+    GltfHelper::Primitive helperPrimitive = GltfHelper::ReadPrimitive(*model, primitive);
 
     std::copy(helperPrimitive.Vertices.begin(), helperPrimitive.Vertices.end(), std::back_inserter(this->vertices));
     std::copy(helperPrimitive.Indices.begin(), helperPrimitive.Indices.end(), std::back_inserter(this->indices));
 
-    pMaterial = std::make_shared<DXMaterial>(model, model.materials[primitive.material]);
+    indexMaterial = static_cast<UINT>(primitive.material);
 }
 
 DXPrimitive::~DXPrimitive()
 {
 }
 
-void DXPrimitive::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize)
+void DXPrimitive::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList,
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize)
 {
     {
         UINT vertexDataSize = static_cast<UINT>(vertices.size() * sizeof(GltfHelper::Vertex));
@@ -203,9 +270,9 @@ void DXPrimitive::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* comman
         numIndices = indexDataSize / 4;    // R32_UINT (SampleAssets::StandardIndexFormat) = 4 bytes each.
     }
     
-    transformCbvOffset = offetInPrimitives * 3 + 0;
+    primitiveCbvOffset = offsetInHeap;
     {
-        const UINT constantBufferSize = sizeof(TransformConstantBuffer);    // CB size is required to be 256-byte aligned.
+        const UINT constantBufferSize = sizeof(PrimitiveConstantBuffer);    // CB size is required to be 256-byte aligned.
 
         ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
@@ -217,85 +284,34 @@ void DXPrimitive::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* comman
 
         NAME_D3D12_OBJECT(constantBuffer);
 
-        CD3DX12_CPU_DESCRIPTOR_HANDLE transformCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), transformCbvOffset, cbvSrvDescriptorSize);
+        CD3DX12_CPU_DESCRIPTOR_HANDLE primitiveCbvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), primitiveCbvOffset, cbvSrvDescriptorSize);
 
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
         cbvDesc.BufferLocation = constantBuffer->GetGPUVirtualAddress();
-        cbvDesc.SizeInBytes = sizeof(TransformConstantBuffer);
-        device->CreateConstantBufferView(&cbvDesc, transformCbvHandle);
+        cbvDesc.SizeInBytes = constantBufferSize;
+        device->CreateConstantBufferView(&cbvDesc, primitiveCbvHandle);
 
         // Map and initialize the constant buffer. We don't unmap this until the
         // app closes. Keeping things mapped for the lifetime of the resource is okay.
         CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-        ThrowIfFailed(constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pTransformCbvDataBegin)));
+        ThrowIfFailed(constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pPrimitiveCbvDataBegin)));
+        memcpy(pPrimitiveCbvDataBegin, &primitiveConstant, constantBufferSize);
+        constantBuffer->Unmap(0, 0);
     }
-
-    pMaterial->Upload(device, commandList, cbvSrvHeap, offetInPrimitives, cbvSrvDescriptorSize);
 }
 
-void DXPrimitive::Transform(XMMATRIX view, XMMATRIX proj)
+void DXPrimitive::Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap *samplerHeap, 
+    INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize, DXMaterial* material)
 {
-    TransformConstantBuffer transformConstantBuffer;
-    XMMATRIX mod = XMLoadFloat4x4(&localTransform);
-    XMStoreFloat4x4(&transformConstantBuffer.ModelViewProj, XMMatrixTranspose(mod * view * proj));
-    memcpy(pTransformCbvDataBegin, &transformConstantBuffer, sizeof(TransformConstantBuffer));
-}
-
-void DXPrimitive::Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature,
-    ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize)
-{
-    commandList->SetGraphicsRootSignature(rootSignature);
-
-    ID3D12DescriptorHeap* ppHeaps[] = { cbvSrvHeap, samplerHeap };
-    commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
     commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     commandList->IASetIndexBuffer(&indexBufferView);
     commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), transformCbvOffset, cbvSrvDescriptorSize);
-    commandList->SetGraphicsRootDescriptorTable(0, cbvSrvHandle);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), primitiveCbvOffset, cbvSrvDescriptorSize);
+    commandList->SetGraphicsRootDescriptorTable(offsetInRootDescriptorTable, cbvSrvHandle);
 
-    pMaterial->Draw(commandList, cbvSrvHeap, 1, cbvSrvDescriptorSize);
+    material->Render(commandList, cbvSrvHeap, samplerHeap, offsetInRootDescriptorTable + 1, cbvSrvDescriptorSize);
 
     commandList->DrawIndexedInstanced(numIndices, 1, 0, 0, 0);
-}
-
-DXMesh::DXMesh(const tinygltf::Model& model, const tinygltf::Node& node, const tinygltf::Mesh& mesh)
-{
-    this->pModel = &model;
-    XMMATRIX localTrans = GltfHelper::ReadNodeLocalTransform(node);
-
-    for (UINT i = 0; i < mesh.primitives.size(); ++i)
-    {
-        const tinygltf::Primitive& tinyPrimitive = mesh.primitives[i];
-        primitives.emplace_back(model, tinyPrimitive, localTrans);
-    }
-
-    primitiveSize = static_cast<UINT>(primitives.size());
-}
-
-void DXMesh::Transform(XMMATRIX view, XMMATRIX proj)
-{
-    for (UINT i = 0; i < primitiveSize; ++i)
-    {
-        primitives[i].Transform(view, proj);
-    }
-}
-
-void DXMesh::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT offetInPrimitives, UINT cbvSrvDescriptorSize)
-{
-    for (UINT i = 0; i < primitiveSize; ++i)
-    {
-        primitives[i].Upload(device, commandList, cbvSrvHeap, offetInPrimitives + i, cbvSrvDescriptorSize);
-    }
-}
-
-void DXMesh::Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature, 
-    ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize)
-{
-    for (UINT i = 0; i < primitiveSize; ++i)
-    {
-        primitives[i].Draw(commandList, rootSignature, cbvSrvHeap, samplerHeap, cbvSrvDescriptorSize);
-    }
 }
 
 DXModel::DXModel(const std::string& assetFullPath):
@@ -304,9 +320,9 @@ DXModel::DXModel(const std::string& assetFullPath):
     tinygltf::TinyGLTF loader;
     std::string err;
     std::string warn;
-    pModel = new tinygltf::Model();
+    pModel = std::make_shared<tinygltf::Model>();
 
-    bool res = loader.LoadASCIIFromFile(pModel, &err, &warn, assetFullPath.c_str());
+    bool res = loader.LoadASCIIFromFile(pModel.get(), &err, &warn, assetFullPath.c_str());
     if (!warn.empty()) {
         std::cout << "WARN: " << warn << std::endl;
     }
@@ -321,13 +337,10 @@ DXModel::DXModel(const std::string& assetFullPath):
         std::cout << "Loaded glTF: " << "BoxTextured.gltf" << std::endl;
 
     ProcessModel();
-
-    meshSize = static_cast<UINT>(meshes.size());
 }
 
 DXModel::~DXModel()
 {
-    delete pModel;
 }
 
 void DXModel::ProcessModel()
@@ -336,6 +349,7 @@ void DXModel::ProcessModel()
     for (UINT i = 0; i < scene.nodes.size(); ++i) {
         ProcessNode(pModel->nodes[scene.nodes[i]]);
     }
+    ProcessMaterial();
 }
 
 void DXModel::ProcessNode(const tinygltf::Node& node)
@@ -350,34 +364,52 @@ void DXModel::ProcessNode(const tinygltf::Node& node)
 
 void DXModel::ProcessMesh(const tinygltf::Node& node, const tinygltf::Mesh& mesh)
 {
-    DXMesh dxMesh(*pModel, node, mesh);
-    meshes.emplace_back(*pModel, node, mesh);
-    primitiveSize += dxMesh.primitiveSize;
+    XMMATRIX localTrans = GltfHelper::ReadNodeLocalTransform(node);
+
+    for (UINT i = 0; i < mesh.primitives.size(); ++i)
+    {
+        const tinygltf::Primitive& tinyPrimitive = mesh.primitives[i];
+        primitives.emplace_back(pModel, tinyPrimitive, localTrans);
+    }
+
+    primitiveSize += static_cast<UINT>(primitives.size());
 }
 
-void DXModel::Transform(XMMATRIX view, XMMATRIX proj)
+void DXModel::ProcessMaterial()
 {
-    for (UINT i = 0; i < meshSize; ++i)
+    materialSize = static_cast<UINT>(pModel->materials.size());
+
+    for (UINT i = 0; i < materialSize; ++i)
     {
-        meshes[i].Transform(view, proj);
+        materials.emplace_back(pModel, pModel->materials[i]);
     }
 }
 
-void DXModel::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, UINT cbvSrvDescriptorSize)
+void DXModel::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
+    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize)
 {
-    UINT offetInPrimitives = 0;
-    for (UINT i = 0; i < meshSize; ++i)
+    UINT offetInPrimitives = offsetInHeap;
+    for (UINT i = 0; i < primitiveSize; ++i)
     {
-        meshes[i].Upload(device, commandList, cbvSrvHeap, offetInPrimitives, cbvSrvDescriptorSize);
-        offetInPrimitives += meshes[i].primitiveSize;
+        primitives[i].Upload(device, commandList, cbvSrvHeap, offetInPrimitives, cbvSrvDescriptorSize);
+        ++offetInPrimitives;
+    }
+
+    UINT offsetInMaterials = offetInPrimitives;
+    for (UINT i = 0; i < materials.size(); ++i)
+    {
+        materials[i].Upload(device, commandList, cbvSrvHeap, offsetInMaterials, cbvSrvDescriptorSize);
+        offsetInMaterials += 6;
     }
 }
 
-void DXModel::Draw(ID3D12GraphicsCommandList* commandList, ID3D12RootSignature* rootSignature, 
-    ID3D12DescriptorHeap* cbvSrvHeap, ID3D12DescriptorHeap* samplerHeap, UINT cbvSrvDescriptorSize)
+void DXModel::Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 
+    ID3D12DescriptorHeap* samplerHeap, INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize)
 {
-    for (UINT i = 0; i < meshSize; ++i)
+    for (UINT i = 0; i < primitiveSize; ++i)
     {
-        meshes[i].Draw(commandList, rootSignature, cbvSrvHeap, samplerHeap, cbvSrvDescriptorSize);
+        UINT index = primitives[i].indexMaterial;
+        primitives[i].Render(commandList, cbvSrvHeap, samplerHeap, 
+            offsetInRootDescriptorTable, cbvSrvDescriptorSize, &materials[index]);
     }
 }
