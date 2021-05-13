@@ -68,80 +68,246 @@ void DXMaterial::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* command
 
     if (baseColorImage != nullptr)
     {
-        UploadImage(device, commandList, cbvSrvHeap, 1, cbvSrvDescriptorSize, 
-            baseColorImage, baseColorTexture.Get(), baseColorTextureUploadHeap.Get());
+        D3D12_RESOURCE_DESC textureDesc = {};
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Width = static_cast<UINT>(baseColorImage->width);
+        textureDesc.Height = static_cast<UINT>(baseColorImage->height);
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.SampleDesc.Quality = 0;
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &textureDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&baseColorTexture)));
+
+        NAME_D3D12_OBJECT(baseColorTexture);
+
+        UINT64 uploadBufferSize = GetRequiredIntermediateSize(baseColorTexture.Get(), 0, 1);
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&baseColorTextureUploadHeap)));
+
+        D3D12_SUBRESOURCE_DATA textureData = {};
+        textureData.pData = baseColorImage->image.data();
+        textureData.RowPitch = static_cast<UINT>(baseColorImage->width) * (UINT)4;
+        textureData.SlicePitch = static_cast<UINT>(baseColorImage->width) * static_cast<UINT>(baseColorImage->height) * (UINT)4;
+
+        UpdateSubresources<1>(commandList, baseColorTexture.Get(), baseColorTextureUploadHeap.Get(), 0, 0, 1, &textureData);
+        commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(baseColorTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset + 1, cbvSrvDescriptorSize);
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = textureDesc.Format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        device->CreateShaderResourceView(baseColorTexture.Get(), &srvDesc, srvHandle);
     }
     if (metallicRoughnessImage != nullptr)
     {
-        UploadImage(device, commandList, cbvSrvHeap, 2, cbvSrvDescriptorSize,
-            metallicRoughnessImage, metallicRoughnessTexture.Get(), metallicRoughnessTextureUploadHeap.Get());
+        D3D12_RESOURCE_DESC textureDesc = {};
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Width = static_cast<UINT>(metallicRoughnessImage->width);
+        textureDesc.Height = static_cast<UINT>(metallicRoughnessImage->height);
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.SampleDesc.Quality = 0;
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &textureDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&metallicRoughnessTexture)));
+
+        UINT64 uploadBufferSize = GetRequiredIntermediateSize(metallicRoughnessTexture.Get(), 0, 1);
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&metallicRoughnessTextureUploadHeap)));
+
+        D3D12_SUBRESOURCE_DATA textureData = {};
+        textureData.pData = metallicRoughnessImage->image.data();
+        textureData.RowPitch = static_cast<UINT>(metallicRoughnessImage->width) * (UINT)4;
+        textureData.SlicePitch = static_cast<UINT>(metallicRoughnessImage->width) * static_cast<UINT>(metallicRoughnessImage->height) * (UINT)4;
+
+        UpdateSubresources<1>(commandList, metallicRoughnessTexture.Get(), metallicRoughnessTextureUploadHeap.Get(), 0, 0, 1, &textureData);
+        commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(metallicRoughnessTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset + 2, cbvSrvDescriptorSize);
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = textureDesc.Format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        device->CreateShaderResourceView(metallicRoughnessTexture.Get(), &srvDesc, srvHandle);
     }
     if (emissiveImage != nullptr)
     {
-        UploadImage(device, commandList, cbvSrvHeap, 3, cbvSrvDescriptorSize,
-            emissiveImage, emissiveTexture.Get(), emissiveTextureUploadHeap.Get());
+        D3D12_RESOURCE_DESC textureDesc = {};
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Width = static_cast<UINT>(emissiveImage->width);
+        textureDesc.Height = static_cast<UINT>(emissiveImage->height);
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.SampleDesc.Quality = 0;
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &textureDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&emissiveTexture)));
+
+        UINT64 uploadBufferSize = GetRequiredIntermediateSize(emissiveTexture.Get(), 0, 1);
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&emissiveTextureUploadHeap)));
+
+        D3D12_SUBRESOURCE_DATA textureData = {};
+        textureData.pData = emissiveImage->image.data();
+        textureData.RowPitch = static_cast<UINT>(emissiveImage->width) * (UINT)4;
+        textureData.SlicePitch = static_cast<UINT>(emissiveImage->width) * static_cast<UINT>(emissiveImage->height) * (UINT)4;
+
+        UpdateSubresources<1>(commandList, emissiveTexture.Get(), emissiveTextureUploadHeap.Get(), 0, 0, 1, &textureData);
+        commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(emissiveTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset + 3, cbvSrvDescriptorSize);
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = textureDesc.Format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        device->CreateShaderResourceView(emissiveTexture.Get(), &srvDesc, srvHandle);
     }
     if (normalImage != nullptr)
     {
-        UploadImage(device, commandList, cbvSrvHeap, 4, cbvSrvDescriptorSize,
-            normalImage, normalTexture.Get(), normalTextureUploadHeap.Get());
+        D3D12_RESOURCE_DESC textureDesc = {};
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Width = static_cast<UINT>(normalImage->width);
+        textureDesc.Height = static_cast<UINT>(normalImage->height);
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.SampleDesc.Quality = 0;
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &textureDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&normalTexture)));
+
+        UINT64 uploadBufferSize = GetRequiredIntermediateSize(normalTexture.Get(), 0, 1);
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&normalTextureUploadHeap)));
+
+        D3D12_SUBRESOURCE_DATA textureData = {};
+        textureData.pData = normalImage->image.data();
+        textureData.RowPitch = static_cast<UINT>(normalImage->width) * (UINT)4;
+        textureData.SlicePitch = static_cast<UINT>(normalImage->width) * static_cast<UINT>(normalImage->height) * (UINT)4;
+
+        UpdateSubresources<1>(commandList, normalTexture.Get(), normalTextureUploadHeap.Get(), 0, 0, 1, &textureData);
+        commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(normalTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset + 4, cbvSrvDescriptorSize);
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = textureDesc.Format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        device->CreateShaderResourceView(normalTexture.Get(), &srvDesc, srvHandle);
     }
     if (occlusionImage != nullptr)
     {
-        UploadImage(device, commandList, cbvSrvHeap, 5, cbvSrvDescriptorSize,
-            occlusionImage, occlusionTexture.Get(), occlusionTextureUploadHeap.Get());
+        D3D12_RESOURCE_DESC textureDesc = {};
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Width = static_cast<UINT>(occlusionImage->width);
+        textureDesc.Height = static_cast<UINT>(occlusionImage->height);
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.SampleDesc.Quality = 0;
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &textureDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&occlusionTexture)));
+
+        UINT64 uploadBufferSize = GetRequiredIntermediateSize(occlusionTexture.Get(), 0, 1);
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&occlusionTextureUploadHeap)));
+
+        D3D12_SUBRESOURCE_DATA textureData = {};
+        textureData.pData = occlusionImage->image.data();
+        textureData.RowPitch = static_cast<UINT>(occlusionImage->width) * (UINT)4;
+        textureData.SlicePitch = static_cast<UINT>(occlusionImage->width) * static_cast<UINT>(occlusionImage->height) * (UINT)4;
+
+        UpdateSubresources<1>(commandList, occlusionTexture.Get(), occlusionTextureUploadHeap.Get(), 0, 0, 1, &textureData);
+        commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(occlusionTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset + 5, cbvSrvDescriptorSize);
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = textureDesc.Format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        device->CreateShaderResourceView(occlusionTexture.Get(), &srvDesc, srvHandle);
     }
-}
-
-void DXMaterial::UploadImage(ID3D12Device* device, ID3D12GraphicsCommandList* commandList,
-    ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInMaterial, UINT cbvSrvDescriptorSize,
-    const tinygltf::Image* image, ID3D12Resource* texture, ID3D12Resource* uploadHeap)
-{
-    D3D12_RESOURCE_DESC textureDesc = {};
-    textureDesc.MipLevels = 1;
-    textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    textureDesc.Width = static_cast<UINT>(image->width);
-    textureDesc.Height = static_cast<UINT>(image->height);
-    textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    textureDesc.DepthOrArraySize = 1;
-    textureDesc.SampleDesc.Count = 1;
-    textureDesc.SampleDesc.Quality = 0;
-    textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-
-    ThrowIfFailed(device->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-        D3D12_HEAP_FLAG_NONE,
-        &textureDesc,
-        D3D12_RESOURCE_STATE_COPY_DEST,
-        nullptr,
-        IID_PPV_ARGS(&texture)));
-
-    UINT64 uploadBufferSize = GetRequiredIntermediateSize(texture, 0, 1);
-
-    ThrowIfFailed(device->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-        D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize),
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&uploadHeap)));
-
-    D3D12_SUBRESOURCE_DATA textureData = {};
-    textureData.pData = image->image.data();
-    textureData.RowPitch = static_cast<UINT>(image->width) * (UINT)4;
-    textureData.SlicePitch = static_cast<UINT>(image->width) * static_cast<UINT>(image->height) * (UINT)4;
-
-    UpdateSubresources<1>(commandList, texture, uploadHeap, 0, 0, 1, &textureData);
-    commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(texture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
-
-    CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), materialCbvOffset + offsetInMaterial, cbvSrvDescriptorSize);
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format = textureDesc.Format;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels = 1;
-    device->CreateShaderResourceView(texture, &srvDesc, srvHandle);
 }
 
 void DXMaterial::Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 

@@ -59,10 +59,6 @@ private:
 	ComPtr<ID3D12Resource> emissiveTextureUploadHeap;
 	ComPtr<ID3D12Resource> normalTextureUploadHeap;
 	ComPtr<ID3D12Resource> occlusionTextureUploadHeap;
-
-	void UploadImage(ID3D12Device* device, ID3D12GraphicsCommandList* commandList,
-		ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInMaterial, UINT cbvSrvDescriptorSize,
-		const tinygltf::Image* image, ID3D12Resource* texture, ID3D12Resource* uploadHeap);
 };
 
 class DXPrimitive
