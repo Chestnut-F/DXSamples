@@ -10,7 +10,9 @@ struct CameraConstantBuffer
     XMFLOAT4X4 Projection;
     XMFLOAT4X4 ViewProjection;
     XMFLOAT3 EyePosW;
-    float padding[13];
+    float NearPlane;
+    float FarPlane;
+    float padding[11];
 };
 static_assert((sizeof(CameraConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 

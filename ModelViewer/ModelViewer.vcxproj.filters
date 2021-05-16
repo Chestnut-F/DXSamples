@@ -82,10 +82,16 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="VertexShader.hlsl">
+    <FxCompile Include="VS.hlsl">
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="PixelShader.hlsl">
+    <FxCompile Include="PS.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="GbufferVS.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="GbufferPS.hlsl">
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
   </ItemGroup>

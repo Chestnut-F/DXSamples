@@ -105,6 +105,9 @@ public:
 	UINT meshSize;
 	UINT primitiveSize;
 	UINT materialSize;
+	UINT cbvOffsetBegin;
+	UINT srvOffsetBegin;
+	UINT cbvSrvOffsetEnd;
 private:
 	std::shared_ptr<tinygltf::Model> pModel;
 	std::vector<DXPrimitive> primitives;

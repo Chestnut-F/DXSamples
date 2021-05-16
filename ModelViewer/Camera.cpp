@@ -73,6 +73,8 @@ void DXCamera::Update(float elapsedSeconds, float fov, float aspectRatio, float 
     XMStoreFloat4x4(&cameraConstantBuffer.View, XMMatrixTranspose(view));
     XMStoreFloat4x4(&cameraConstantBuffer.Projection, XMMatrixTranspose(proj));
     XMStoreFloat4x4(&cameraConstantBuffer.ViewProjection, XMMatrixTranspose(view * proj));
+    cameraConstantBuffer.NearPlane = nearPlane;
+    cameraConstantBuffer.FarPlane = farPlane;
     memcpy(pCameraCbvDataBegin, &cameraConstantBuffer, sizeof(CameraConstantBuffer));
 }
 

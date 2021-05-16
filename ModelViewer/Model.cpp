@@ -554,6 +554,7 @@ void DXModel::ProcessMaterial()
 void DXModel::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, 
     ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize)
 {
+    cbvOffsetBegin = offsetInHeap;
     UINT offetInPrimitives = offsetInHeap;
     for (UINT i = 0; i < primitiveSize; ++i)
     {
@@ -561,12 +562,14 @@ void DXModel::Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandLis
         ++offetInPrimitives;
     }
 
+    srvOffsetBegin = offetInPrimitives;;
     UINT offsetInMaterials = offetInPrimitives;
     for (UINT i = 0; i < materials.size(); ++i)
     {
         materials[i].Upload(device, commandList, cbvSrvHeap, offsetInMaterials, cbvSrvDescriptorSize);
         offsetInMaterials += 6;
     }
+    cbvSrvOffsetEnd = offsetInMaterials;
 }
 
 void DXModel::Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, 
