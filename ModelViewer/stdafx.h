@@ -34,5 +34,6 @@
 #include <limits>
 #include <locale>
 #include <codecvt>
+#include <random>
 #include <wrl.h>
 #include <shellapi.h>

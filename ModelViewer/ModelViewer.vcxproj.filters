@@ -94,5 +94,8 @@
     <FxCompile Include="GbufferPS.hlsl">
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="SSAO.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>

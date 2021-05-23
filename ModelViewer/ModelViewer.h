@@ -19,6 +19,15 @@ public:
     virtual void OnKeyUp(UINT8 key);
 private:
     static const UINT FrameCount = 2;
+    static const UINT SSAOKernelSize = 64;
+    static const UINT SSAONoiseDim = 8;
+    static const UINT SSAONoiseDim2 = SSAONoiseDim * SSAONoiseDim;
+    struct SSAOKernelConstantBuffer
+    {
+        XMFLOAT4 ssaoKernel[SSAOKernelSize];
+        XMFLOAT4 ssaoNoise[SSAONoiseDim2];
+    }m_ssaoKernel;
+    static_assert((sizeof(SSAOKernelConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 
     std::unique_ptr<DXModel> m_pModel;
     std::unique_ptr<DXCamera> m_pCamera;
@@ -42,6 +51,13 @@ private:
     ComPtr<ID3D12Resource> m_positionDepthRenderTarget;
     ComPtr<ID3D12Resource> m_normalRenderTarget;
     ComPtr<ID3D12Resource> m_albedoRenderTarget;
+    ComPtr<ID3D12RootSignature> m_ssaoRootSignature;
+    ComPtr<ID3D12PipelineState> m_ssaoState;
+    UINT m_ssaoCbvOffset;
+    UINT8* m_pSSAOCbvDataBegin;
+    ComPtr<ID3D12Resource> m_ssaoConstantBuffer;
+    ComPtr<ID3D12Resource> m_ssaoRenderTarget;
+    ComPtr<ID3D12PipelineState> m_blurState;
 
     // Render targets.
     ComPtr<ID3D12RootSignature> m_rootSignature;
