@@ -7,3 +7,14 @@
 <https://github.com/syoyo/tinygltf>  
 <https://github.com/mmikk/MikkTSpace>
 ## SSAO
+### 原图
+<img src="images/ssao_before.bmp" height="200">
+
+### SSAO  
+<img src="images/ssao.bmp" height="200">
+
+### 模糊  
+<img src="images/ssao_blur.bmp" height="200">
+
+### Final  
+<img src="images/ssao_after.bmp" height="200">
