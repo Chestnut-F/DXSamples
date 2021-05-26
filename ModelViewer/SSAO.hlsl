@@ -1,8 +1,8 @@
-
 SamplerState  g_sampler : register(s0);
 Texture2D g_txPositionDepth : register(t0);
 Texture2D g_txNormal : register(t1);
-Texture2D g_txSSAONoise : register(t2);
+Texture2D g_txTangent : register(t2);
+Texture2D g_txSSAONoise : register(t3);
 
 #define SSAO_KERNEL_SIZE 64
 #define SSAO_RADIUS 0.5
@@ -28,21 +28,16 @@ struct VSOutput
 	float2 uv : TEXCOORD;
 };
 
-float main(VSOutput input) : SV_TARGET
+float4 main(VSOutput input) : SV_TARGET
 {
 	float3 pixPos = g_txPositionDepth.Sample(g_sampler, input.uv).rgb;
 	float3 pixNormal = normalize(g_txNormal.Sample(g_sampler, input.uv).rgb * 2.0 - 1.0);
 
-	int2 texDim;
-	g_txPositionDepth.GetDimensions(texDim.x, texDim.y);
-	int2 noiseDim;
-	g_txSSAONoise.GetDimensions(noiseDim.x, noiseDim.y);
-	const float2 noiseUV = float2(float(texDim.x) / float(noiseDim.x), float(texDim.y) / float(noiseDim.y)) * input.uv;
-	float3 randomVec = g_txSSAONoise.Sample(g_sampler, noiseUV).xyz * 2.0 - 1.0;
+	float3 randomVec = g_txSSAONoise.Sample(g_sampler, input.uv).xyz * 2.0 - 1.0;
 
 	float3 tangent = normalize(randomVec - pixNormal * dot(randomVec, pixNormal)); // Gram¨CSchmidt process
-	float3 bitangent = cross(tangent, pixNormal);
-	float3x3 TBN = transpose(float3x3(tangent, bitangent, pixNormal));
+	float3 bitangent = normalize(cross(tangent, pixNormal));
+	float3x3 TBN = float3x3(tangent, bitangent, pixNormal);
 
 	float occlusion = 0.0f;
 	for (int i = 0; i < SSAO_KERNEL_SIZE; i++)
@@ -53,7 +48,7 @@ float main(VSOutput input) : SV_TARGET
 		float4 offset = float4(samplePos, 1.0f);
 		offset = mul(offset, gProjection);
 		offset.xyz /= offset.w;
-		//offset.xyz = offset.xyz * 0.5f + 0.5f;
+		offset.xy = float2(offset.x * 0.5f + 0.5f, 1.0f - (offset.y * 0.5f + 0.5f));
 
 		float sampleDepth = g_txPositionDepth.Sample(g_sampler, offset.xy).w;
 
@@ -62,5 +57,5 @@ float main(VSOutput input) : SV_TARGET
 	}
 	occlusion = 1.0 - (occlusion / float(SSAO_KERNEL_SIZE));
 
-	return occlusion;
+	return float4(occlusion, occlusion, occlusion, 1.0f);
 }

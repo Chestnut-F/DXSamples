@@ -13,6 +13,7 @@ void ModelViewer::OnInit()
 {
     m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 0.0f, 1.0f, 0.0f }), XMVECTOR({ 0.0f, 0.0f, 1.0f }));
     m_pLight = std::make_unique<DXLight>(XMFLOAT3({ 0.0f, 100.0f, 0.0f }), 2000.0f);
+    m_pSSAO = std::make_unique<SSAO>();
 
     InitDevice();
     CreateDescriptorHeaps();
@@ -130,7 +131,10 @@ void ModelViewer::CreateDescriptorHeaps()
 {
     // Describe and create a render target view (RTV) descriptor heap.
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-    rtvHeapDesc.NumDescriptors = FrameCount + 4;
+    rtvHeapDesc.NumDescriptors = 
+        FrameCount +                // Frame Count
+        4 +                         // G Buffer
+        2;                          // SSAO + SSAO Blur
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
@@ -209,6 +213,18 @@ void ModelViewer::CreateDescriptorHeaps()
             &renderTargetDesc,
             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
             &clearValue,
+            IID_PPV_ARGS(&m_tangentRenderTarget)
+        ));
+        NAME_D3D12_OBJECT(m_tangentRenderTarget);
+        m_device->CreateRenderTargetView(m_tangentRenderTarget.Get(), &rtvDesc, rtvHandle);
+        rtvHandle.Offset(1, m_rtvDescriptorSize);
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &renderTargetDesc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            &clearValue,
             IID_PPV_ARGS(&m_albedoRenderTarget)
         ));
         NAME_D3D12_OBJECT(m_albedoRenderTarget);
@@ -217,38 +233,8 @@ void ModelViewer::CreateDescriptorHeaps()
     }
 
     // Create ssao render targets that are the same dimensions as the swap chain.
-    {
-        D3D12_RESOURCE_DESC renderTargetDesc;
-        renderTargetDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        renderTargetDesc.Alignment = 0;
-        renderTargetDesc.Width = m_width;
-        renderTargetDesc.Height = m_height;
-        renderTargetDesc.DepthOrArraySize = 1;
-        renderTargetDesc.MipLevels = 1;
-        renderTargetDesc.Format = DXGI_FORMAT_R8_UNORM;
-        renderTargetDesc.SampleDesc.Count = 1;
-        renderTargetDesc.SampleDesc.Quality = 0;
-        renderTargetDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        renderTargetDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-
-        D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-        rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-        rtvDesc.Format = DXGI_FORMAT_R8_UNORM;
-        rtvDesc.Texture2D.MipSlice = 0;
-        rtvDesc.Texture2D.PlaneSlice = 0;
-
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-            D3D12_HEAP_FLAG_NONE,
-            &renderTargetDesc,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-            nullptr,
-            IID_PPV_ARGS(&m_ssaoRenderTarget)
-        ));
-        NAME_D3D12_OBJECT(m_ssaoRenderTarget);
-        m_device->CreateRenderTargetView(m_ssaoRenderTarget.Get(), &rtvDesc, rtvHandle);
-        rtvHandle.Offset(1, m_rtvDescriptorSize);
-    }
+    m_pSSAO->Init(m_device.Get(), m_width, m_height, m_rtvHeap.Get(), rtvHandle, m_rtvDescriptorSize);
+    rtvHandle.Offset(2, m_rtvDescriptorSize);
 
     // Describe and create a depth stencil view (DSV) descriptor heap.
     {
@@ -364,60 +350,17 @@ void ModelViewer::CreateRootSignature()
     }
 
     // SSAO Pass.
-    {
-        CD3DX12_DESCRIPTOR_RANGE1 ranges[5];
-        ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-        ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 1, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-        ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-        ranges[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-        ranges[4].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-
-        CD3DX12_ROOT_PARAMETER1 rootParameters[5];
-        rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_PIXEL);
-        rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
-        rootParameters[2].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_PIXEL);
-        rootParameters[3].InitAsDescriptorTable(1, &ranges[3], D3D12_SHADER_VISIBILITY_PIXEL);
-        rootParameters[4].InitAsDescriptorTable(1, &ranges[4], D3D12_SHADER_VISIBILITY_PIXEL);
-
-        D3D12_STATIC_SAMPLER_DESC sampler = {};
-        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-        sampler.MipLODBias = 0;
-        sampler.MaxAnisotropy = 0;
-        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-        sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-        sampler.MinLOD = 0.0f;
-        sampler.MaxLOD = D3D12_FLOAT32_MAX;
-        sampler.ShaderRegister = 0;
-        sampler.RegisterSpace = 0;
-        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-
-        // Allow input layout and deny uneccessary access to certain pipeline stages.
-        D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
-            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
-            D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
-            D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-            D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
-
-        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 1, &sampler, rootSignatureFlags);
-
-        ComPtr<ID3DBlob> signature;
-        ComPtr<ID3DBlob> error;
-        ThrowIfFailed(D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, featureData.HighestVersion, &signature, &error));
-        ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_ssaoRootSignature)));
-        NAME_D3D12_OBJECT(m_ssaoRootSignature);
-    }
+    m_pSSAO->CreateRootSignature(m_device.Get());
 
     // Final Pass.
     {
-        CD3DX12_DESCRIPTOR_RANGE1 ranges[1];
+        CD3DX12_DESCRIPTOR_RANGE1 ranges[2];
         ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
+        ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0);
 
-        CD3DX12_ROOT_PARAMETER1 rootParameters[1];
+        CD3DX12_ROOT_PARAMETER1 rootParameters[2];
         rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_PIXEL);
+        rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
 
         D3D12_STATIC_SAMPLER_DESC sampler = {};
         sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
@@ -482,10 +425,11 @@ void ModelViewer::CreatePipelineState()
         psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
         psoDesc.SampleMask = UINT_MAX;
         psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 3;
+        psoDesc.NumRenderTargets = 4;
         psoDesc.RTVFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT;
         psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM;
         psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM;
         psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         psoDesc.SampleDesc.Count = 1;
 
@@ -494,34 +438,8 @@ void ModelViewer::CreatePipelineState()
     }
 
     // SSAO Pass.
-    {
-        ComPtr<ID3DBlob> vertexShader;
-        ComPtr<ID3DBlob> pixelShader;
-
-        ThrowIfFailed(D3DReadFileToBlob(GetAssetFullPath(L"VS.cso").c_str(), &vertexShader));
-        ThrowIfFailed(D3DReadFileToBlob(GetAssetFullPath(L"SSAO.cso").c_str(), &pixelShader));
-
-        // Describe and create the graphics pipeline state object (PSO).
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.InputLayout = { nullptr, 0 };
-        psoDesc.pRootSignature = m_ssaoRootSignature.Get();
-        psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-        psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-        psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        psoDesc.DepthStencilState.DepthEnable = FALSE;
-        psoDesc.DepthStencilState.StencilEnable = FALSE;
-        psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        psoDesc.SampleMask = UINT_MAX;
-        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 1;
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8_UNORM;
-        psoDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
-        psoDesc.SampleDesc.Count = 1;
-
-        ThrowIfFailed(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_ssaoState)));
-        NAME_D3D12_OBJECT(m_ssaoState);
-    }
+    m_pSSAO->CreatePipelineState(m_device.Get(), GetAssetFullPath(L"VS.cso"), 
+        GetAssetFullPath(L"SSAO.cso"), GetAssetFullPath(L"SSAOBlur.cso"));
 
     // Final Pass.
     {
@@ -564,7 +482,13 @@ void ModelViewer::LoadAssets()
     m_pModel = std::make_unique<DXModel>(s_assetFullPath);
 
     D3D12_DESCRIPTOR_HEAP_DESC cbvSrvHeapDesc = {};
-    cbvSrvHeapDesc.NumDescriptors = 1 + 1 + m_pModel->primitiveSize + (m_pModel->materialSize * 6) + 1 + 3;
+    cbvSrvHeapDesc.NumDescriptors = 
+        1 +                                 // Camera
+        1 +                                 // Light
+        m_pModel->primitiveSize +           // Model Primitive
+        (m_pModel->materialSize * 6) +      // Model Material
+        4 +                                 // G Buffer
+        4;                                  // SSAO
     cbvSrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     cbvSrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvSrvHeapDesc, IID_PPV_ARGS(&m_cbvSrvHeap)));
@@ -577,57 +501,8 @@ void ModelViewer::LoadAssets()
     m_pModel->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), 2, m_cbvSrvDescriptorSize);
 
     {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> dis(0.0, 1.0);
-        for (uint32_t i = 0; i < SSAOKernelSize; ++i)
-        {
-            XMFLOAT3 sample(dis(gen) * 2.0f - 1.0f, dis(gen) * 2.0f - 1.0f, dis(gen));
-            XMVECTOR sampleVector = XMVector3Normalize(XMLoadFloat3(&sample));
-            sampleVector *= dis(gen);
-            float scale = float(i) / float(SSAOKernelSize);
-            scale = 0.1f + scale * scale * (1.0f - 0.1f);
-            XMStoreFloat4(&m_ssaoKernel.ssaoKernel[i], sampleVector * scale);
-        }
-
-        m_ssaoCbvOffset = m_pModel->cbvSrvOffsetEnd;
-        const UINT constantBufferSize = sizeof(SSAOKernelConstantBuffer);
-
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-            D3D12_HEAP_FLAG_NONE,
-            &CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize),
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&m_ssaoConstantBuffer)));
-
-        NAME_D3D12_OBJECT(m_ssaoConstantBuffer);
-
-        CD3DX12_CPU_DESCRIPTOR_HANDLE cbvHandle(
-            m_cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), m_ssaoCbvOffset, m_cbvSrvDescriptorSize);
-
-        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-        cbvDesc.BufferLocation = m_ssaoConstantBuffer->GetGPUVirtualAddress();
-        cbvDesc.SizeInBytes = constantBufferSize;
-        m_device->CreateConstantBufferView(&cbvDesc, cbvHandle);
-
-        // Map and initialize the constant buffer. We don't unmap this until the
-        // app closes. Keeping things mapped for the lifetime of the resource is okay.
-        CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-        ThrowIfFailed(m_ssaoConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pSSAOCbvDataBegin)));
-
-        // Random noise
-        for (uint32_t i = 0; i < SSAONoiseDim2; i++)
-        {
-            XMFLOAT2 noise(dis(gen) * 2.0f - 1.0f, dis(gen) * 2.0f - 1.0f);
-            XMVECTOR noiseVector = XMVector3Normalize(XMLoadFloat2(&noise));
-            XMStoreFloat4(&m_ssaoKernel.ssaoNoise[i], noiseVector);
-        }
-    }
-
-    {
         CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(
-            m_cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), m_ssaoCbvOffset + 1, m_cbvSrvDescriptorSize);
+            m_cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), m_pModel->cbvSrvOffsetEnd, m_cbvSrvDescriptorSize);
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -641,9 +516,14 @@ void ModelViewer::LoadAssets()
         m_device->CreateShaderResourceView(m_normalRenderTarget.Get(), &srvDesc, srvHandle);
         srvHandle.Offset(1, m_cbvSrvDescriptorSize);
 
+        m_device->CreateShaderResourceView(m_tangentRenderTarget.Get(), &srvDesc, srvHandle);
+        srvHandle.Offset(1, m_cbvSrvDescriptorSize);
+
         m_device->CreateShaderResourceView(m_albedoRenderTarget.Get(), &srvDesc, srvHandle);
         srvHandle.Offset(1, m_cbvSrvDescriptorSize);
     }
+
+    m_pSSAO->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), m_pModel->cbvSrvOffsetEnd + 4, m_cbvSrvDescriptorSize);
 }
 
 void ModelViewer::OnUpdate()
@@ -663,8 +543,7 @@ void ModelViewer::OnUpdate()
 
     m_pCamera->Update(static_cast<float>(m_timer.GetElapsedSeconds()), XM_PI / 3.0f, m_aspectRatio);
     m_pLight->Update();
-
-    memcpy(m_pSSAOCbvDataBegin, &m_ssaoKernel, sizeof(SSAOKernelConstantBuffer));
+    m_pSSAO->Update();
 }
 
 void ModelViewer::OnRender()
@@ -700,22 +579,26 @@ void ModelViewer::PopulateCommandList()
         m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
             m_normalRenderTarget.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
         m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            m_tangentRenderTarget.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
+        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
             m_albedoRenderTarget.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
         CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
-        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle[3] =
+        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle[4] =
         {
             CD3DX12_CPU_DESCRIPTOR_HANDLE(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), FrameCount, m_rtvDescriptorSize),
             CD3DX12_CPU_DESCRIPTOR_HANDLE(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), FrameCount + 1, m_rtvDescriptorSize),
-            CD3DX12_CPU_DESCRIPTOR_HANDLE(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), FrameCount + 2, m_rtvDescriptorSize)
+            CD3DX12_CPU_DESCRIPTOR_HANDLE(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), FrameCount + 2, m_rtvDescriptorSize),
+            CD3DX12_CPU_DESCRIPTOR_HANDLE(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), FrameCount + 3, m_rtvDescriptorSize)
         };
 
         m_commandList->ClearRenderTargetView(rtvHandle[0], clearColor, 0, nullptr);
         m_commandList->ClearRenderTargetView(rtvHandle[1], clearColor, 0, nullptr);
         m_commandList->ClearRenderTargetView(rtvHandle[2], clearColor, 0, nullptr);
+        m_commandList->ClearRenderTargetView(rtvHandle[3], clearColor, 0, nullptr);
         m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-        m_commandList->OMSetRenderTargets(3, &rtvHandle[0], FALSE, &dsvHandle);
-        
+        m_commandList->OMSetRenderTargets(4, &rtvHandle[0], FALSE, &dsvHandle);
+
         m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 
         m_pCamera->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), 0, m_cbvSrvDescriptorSize);
@@ -727,50 +610,33 @@ void ModelViewer::PopulateCommandList()
         m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
             m_normalRenderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
         m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            m_tangentRenderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
             m_albedoRenderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
     }
 
     // SSAO Pass.
     {
-        m_commandList->SetGraphicsRootSignature(m_ssaoRootSignature.Get());
+        m_commandList->SetGraphicsRootSignature(m_pSSAO->GetRootSignature());
 
         m_commandList->RSSetViewports(1, &m_viewport);
         m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
-        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            m_ssaoRenderTarget.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
-
-        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-            m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), FrameCount + 3, m_rtvDescriptorSize);
-        CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
-
-        const float ssaoClearColor[] = { 1.0f };
-        m_commandList->ClearRenderTargetView(rtvHandle, ssaoClearColor, 0, nullptr);
-        m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-        m_commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, nullptr);
+        CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(
+            m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_pModel->cbvSrvOffsetEnd, m_cbvSrvDescriptorSize);
 
         m_pCamera->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), 0, m_cbvSrvDescriptorSize);
-        CD3DX12_GPU_DESCRIPTOR_HANDLE cbvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(
-            m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_ssaoCbvOffset, m_cbvSrvDescriptorSize);
-        m_commandList->SetGraphicsRootDescriptorTable(1, cbvHandle);
+        m_pSSAO->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), 1, m_cbvSrvDescriptorSize, srvHandle);
+    }
 
-        CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(
-            m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_ssaoCbvOffset + 1, m_cbvSrvDescriptorSize);
-        m_commandList->SetGraphicsRootDescriptorTable(2, srvHandle);
-        srvHandle.Offset(1, m_cbvSrvDescriptorSize);
-        m_commandList->SetGraphicsRootDescriptorTable(3, srvHandle);
-        srvHandle.Offset(1, m_cbvSrvDescriptorSize);
-        m_commandList->SetGraphicsRootDescriptorTable(4, srvHandle);
+    // SSAO Blur Pass.
+    {
+        m_commandList->SetGraphicsRootSignature(m_pSSAO->GetBlurRootSignature());
 
-        m_commandList->SetPipelineState(m_ssaoState.Get());
+        m_commandList->RSSetViewports(1, &m_viewport);
+        m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
-        m_commandList->IASetVertexBuffers(0, 0, nullptr);
-        m_commandList->IASetIndexBuffer(nullptr);
-        m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        m_commandList->DrawInstanced(6, 1, 0, 0);
-
-        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            m_ssaoRenderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+        m_pSSAO->Blur(m_commandList.Get(), m_cbvSrvHeap.Get(), 0, m_cbvSrvDescriptorSize);
     }
 
     // Final Pass.
@@ -790,8 +656,11 @@ void ModelViewer::PopulateCommandList()
         m_commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, nullptr);
 
         CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(
-            m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_ssaoCbvOffset + 3, m_cbvSrvDescriptorSize);
+            m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_pModel->cbvSrvOffsetEnd + 3, m_cbvSrvDescriptorSize);
         m_commandList->SetGraphicsRootDescriptorTable(0, srvHandle);
+        CD3DX12_GPU_DESCRIPTOR_HANDLE ssaoSrvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(
+            m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_pSSAO->ssaoCbvSrvOffset + 2, m_cbvSrvDescriptorSize);
+        m_commandList->SetGraphicsRootDescriptorTable(1, ssaoSrvHandle);
 
         m_commandList->SetPipelineState(m_pipelineState.Get());
 

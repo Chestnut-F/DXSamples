@@ -10,6 +10,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_MSC_SECURE_CRT
 #include "tiny_gltf.h"
+#include "mikktspace.h"
 #include "GltfHelper.h"
 
 using namespace DirectX;
@@ -18,6 +19,56 @@ using namespace DirectX;
 
 namespace
 {
+    // The glTF 2 specification recommends using the MikkTSpace algorithm to generate
+    // tangents when none are available. This function takes a GltfHelper Primitive which has
+    // no tangents and uses the MikkTSpace algorithm to generate the tangents. This can
+    // be computationally expensive.
+    void ComputeTriangleTangents(GltfHelper::Primitive& primitive)
+    {
+        // Set up the callbacks so that MikkTSpace can read the Primitive data.
+        SMikkTSpaceInterface mikkInterface{};
+        mikkInterface.m_getNumFaces = [](const SMikkTSpaceContext* pContext) {
+            auto primitive = static_cast<const GltfHelper::Primitive*>(pContext->m_pUserData);
+            assert((primitive->Indices.size() % TRIANGLE_VERTEX_COUNT) == 0); // Only triangles are supported.
+            return (int)(primitive->Indices.size() / TRIANGLE_VERTEX_COUNT);
+        };
+        mikkInterface.m_getNumVerticesOfFace = [](const SMikkTSpaceContext* pContext, int iFace) {
+            return TRIANGLE_VERTEX_COUNT;
+        };
+        mikkInterface.m_getPosition = [](const SMikkTSpaceContext* pContext, float fvPosOut[], const int iFace, const int iVert) {
+            auto primitive = static_cast<const GltfHelper::Primitive*>(pContext->m_pUserData);
+            const auto vertexIndex = primitive->Indices[(iFace * TRIANGLE_VERTEX_COUNT) + iVert];
+            memcpy(fvPosOut, &primitive->Vertices[vertexIndex].Position, sizeof(float) * 3);
+        };
+        mikkInterface.m_getNormal = [](const SMikkTSpaceContext* pContext, float fvNormOut[], const int iFace, const int iVert) {
+            auto primitive = static_cast<const GltfHelper::Primitive*>(pContext->m_pUserData);
+            const auto vertexIndex = primitive->Indices[(iFace * TRIANGLE_VERTEX_COUNT) + iVert];
+            memcpy(fvNormOut, &primitive->Vertices[vertexIndex].Normal, sizeof(float) * 3);
+        };
+        mikkInterface.m_getTexCoord = [](const SMikkTSpaceContext* pContext, float fvTexcOut[], const int iFace, const int iVert) {
+            auto primitive = static_cast<const GltfHelper::Primitive*>(pContext->m_pUserData);
+            const auto vertexIndex = primitive->Indices[(iFace * TRIANGLE_VERTEX_COUNT) + iVert];
+            memcpy(fvTexcOut, &primitive->Vertices[vertexIndex].TexCoord0, sizeof(float) * 2);
+        };
+        mikkInterface.m_setTSpaceBasic = [](const SMikkTSpaceContext* pContext, const float fvTangent[], const float fSign, const int iFace, const int iVert) {
+            auto primitive = static_cast<GltfHelper::Primitive*>(pContext->m_pUserData);
+            const auto vertexIndex = primitive->Indices[(iFace * TRIANGLE_VERTEX_COUNT) + iVert];
+            primitive->Vertices[vertexIndex].Tangent.x = fvTangent[0];
+            primitive->Vertices[vertexIndex].Tangent.y = fvTangent[1];
+            primitive->Vertices[vertexIndex].Tangent.z = fvTangent[2];
+            primitive->Vertices[vertexIndex].Tangent.w = fSign;
+        };
+
+        // Run the MikkTSpace algorithm.
+        SMikkTSpaceContext mikkContext{};
+        mikkContext.m_pUserData = &primitive;
+        mikkContext.m_pInterface = &mikkInterface;
+        if (genTangSpaceDefault(&mikkContext) == 0)
+        {
+            throw std::exception("Failed to generate tangents");
+        }
+    }
+
     // Generates normals for the trianges in the GltfHelper Primitive object.
     void ComputeTriangleNormals(GltfHelper::Primitive& primitive)
     {
@@ -401,6 +452,12 @@ namespace GltfHelper
         if (gltfPrimitive.attributes.find("NORMAL") == std::end(gltfPrimitive.attributes))
         {
             ComputeTriangleNormals(primitive);
+        }
+
+        // If tangents are missing, compute tangents.
+        if (gltfPrimitive.attributes.find("TANGENT") == std::end(gltfPrimitive.attributes))
+        {
+            ComputeTriangleTangents(primitive);
         }
 
         return primitive;
