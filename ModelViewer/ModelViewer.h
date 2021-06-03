@@ -4,6 +4,7 @@
 #include "Camera.h"
 #include "Light.h"
 #include "SSAO.h"
+#include "ImageBasedLighting.h"
 #include "StepTimer.h"
 
 class ModelViewer : public DXSample
@@ -24,6 +25,7 @@ private:
     std::unique_ptr<DXModel> m_pModel;
     std::unique_ptr<DXCamera> m_pCamera;
     std::unique_ptr<DXLight> m_pLight;
+    std::unique_ptr<DXImageBasedLighting> m_pIBL;
 
     // Pipeline objects.
     CD3DX12_VIEWPORT m_viewport;
@@ -72,6 +74,7 @@ private:
     void CreateRootSignature();
     void CreatePipelineState();
     void LoadAssets();
+    void PreCompute();
     void PopulateCommandList();
     void WaitForPreviousFrame();
 };

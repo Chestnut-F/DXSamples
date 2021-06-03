@@ -109,7 +109,7 @@ void SSAO::CreateRootSignature(ID3D12Device* device)
 }
 
 void SSAO::CreatePipelineState(ID3D12Device* device, const std::wstring& vsName, 
-    const std::wstring& psName, const std::wstring& ps2Name)
+    const std::wstring& psName, const std::wstring& psBlurName)
 {
     // SSAO
     {
@@ -147,7 +147,7 @@ void SSAO::CreatePipelineState(ID3D12Device* device, const std::wstring& vsName,
         ComPtr<ID3DBlob> pixelShader;
 
         ThrowIfFailed(D3DReadFileToBlob(vsName.c_str(), &vertexShader));
-        ThrowIfFailed(D3DReadFileToBlob(ps2Name.c_str(), &pixelShader));
+        ThrowIfFailed(D3DReadFileToBlob(psBlurName.c_str(), &pixelShader));
 
         // Describe and create the graphics pipeline state object (PSO).
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -172,9 +172,11 @@ void SSAO::CreatePipelineState(ID3D12Device* device, const std::wstring& vsName,
     }
 }
 
-void SSAO::Init(ID3D12Device* device, UINT width, UINT height, ID3D12DescriptorHeap* rtvHeap, 
+INT SSAO::Init(ID3D12Device* device, UINT width, UINT height,
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle, UINT rtvDescriptorSize)
 {
+    INT rtvOffset = 0;
+
     ssaoRtvHandle = rtvHandle;
     D3D12_RESOURCE_DESC renderTargetDesc;
     renderTargetDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -211,6 +213,7 @@ void SSAO::Init(ID3D12Device* device, UINT width, UINT height, ID3D12DescriptorH
     NAME_D3D12_OBJECT(ssaoRenderTarget);
     device->CreateRenderTargetView(ssaoRenderTarget.Get(), &rtvDesc, ssaoRtvHandle);
     rtvHandle.Offset(1, rtvDescriptorSize);
+    rtvOffset++;
 
     ssaoBlurRtvHandle = rtvHandle;
     ThrowIfFailed(device->CreateCommittedResource(
@@ -223,6 +226,9 @@ void SSAO::Init(ID3D12Device* device, UINT width, UINT height, ID3D12DescriptorH
     ));
     NAME_D3D12_OBJECT(ssaoBlurRenderTarget);
     device->CreateRenderTargetView(ssaoBlurRenderTarget.Get(), &rtvDesc, ssaoBlurRtvHandle);
+    rtvOffset++;
+
+    return rtvOffset;
 }
 
 void SSAO::Update()

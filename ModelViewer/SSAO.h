@@ -27,9 +27,9 @@ public:
 
     void CreateRootSignature(ID3D12Device* device);
     void CreatePipelineState(ID3D12Device* device, const std::wstring& vsName, 
-        const std::wstring& psName, const std::wstring& ps2Name);
+        const std::wstring& psName, const std::wstring& psBlurName);
 
-    void Init(ID3D12Device* device, UINT width, UINT height, ID3D12DescriptorHeap* rtvHeap, 
+    INT Init(ID3D12Device* device, UINT width, UINT height, 
         CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle, UINT rtvDescriptorSize);
     void Update();
     void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList,

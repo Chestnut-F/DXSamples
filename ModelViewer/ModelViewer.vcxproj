@@ -159,6 +159,7 @@
     <ClInclude Include="mikktspace.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="ModelViewer.h" />
+    <ClInclude Include="ImageBasedLighting.h" />
     <ClInclude Include="SSAO.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="StepTimer.h" />
@@ -173,6 +174,7 @@
     <ClCompile Include="mikktspace.cpp" />
     <ClCompile Include="Model.cpp" />
     <ClCompile Include="ModelViewer.cpp" />
+    <ClCompile Include="ImageBasedLighting.cpp" />
     <ClCompile Include="SSAO.cpp" />
     <ClCompile Include="stdafx.cpp" />
     <ClCompile Include="Win32Application.cpp" />
@@ -191,6 +193,12 @@
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Vertex</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.1</ShaderModel>
+    </FxCompile>
+    <FxCompile Include="GenBRDFLUT.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="PS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>

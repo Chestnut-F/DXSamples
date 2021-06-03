@@ -57,6 +57,9 @@
     <ClInclude Include="mikktspace.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="ImageBasedLighting.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DXSample.cpp">
@@ -92,6 +95,9 @@
     <ClCompile Include="mikktspace.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="ImageBasedLighting.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="VS.hlsl">
@@ -110,6 +116,9 @@
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="SSAOBlur.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="GenBRDFLUT.hlsl">
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
   </ItemGroup>

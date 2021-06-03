@@ -11,9 +11,10 @@ ModelViewer::ModelViewer(UINT width, UINT height, std::wstring name):
 
 void ModelViewer::OnInit()
 {
-    m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 0.0f, 1.0f, 0.0f }), XMVECTOR({ 0.0f, 0.0f, 1.0f }));
+    m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 0.0f, 1.0f, 0.0f }), XMVECTOR({ -1.0f, 0.0f, 0.0f }));
     m_pLight = std::make_unique<DXLight>(XMFLOAT3({ 0.0f, 100.0f, 0.0f }), 2000.0f);
     m_pSSAO = std::make_unique<SSAO>();
+    m_pIBL = std::make_unique<DXImageBasedLighting>();
 
     InitDevice();
     CreateDescriptorHeaps();
@@ -30,6 +31,9 @@ void ModelViewer::OnInit()
     m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     WaitForPreviousFrame();
+
+    // Precomputation.
+    PreCompute();
 }
 
 
@@ -131,10 +135,11 @@ void ModelViewer::CreateDescriptorHeaps()
 {
     // Describe and create a render target view (RTV) descriptor heap.
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-    rtvHeapDesc.NumDescriptors = 
+    rtvHeapDesc.NumDescriptors =
         FrameCount +                // Frame Count
         4 +                         // G Buffer
-        2;                          // SSAO + SSAO Blur
+        2 +                         // SSAO + SSAO Blur
+        1;                          // PBR IBL
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
@@ -233,8 +238,11 @@ void ModelViewer::CreateDescriptorHeaps()
     }
 
     // Create ssao render targets that are the same dimensions as the swap chain.
-    m_pSSAO->Init(m_device.Get(), m_width, m_height, m_rtvHeap.Get(), rtvHandle, m_rtvDescriptorSize);
-    rtvHandle.Offset(2, m_rtvDescriptorSize);
+    INT offset = m_pSSAO->Init(m_device.Get(), m_width, m_height, rtvHandle, m_rtvDescriptorSize);
+    rtvHandle.Offset(offset, m_rtvDescriptorSize);
+
+    offset = m_pIBL->Init(m_device.Get(), rtvHandle, m_rtvDescriptorSize);
+    rtvHandle.Offset(offset, m_rtvDescriptorSize);
 
     // Describe and create a depth stencil view (DSV) descriptor heap.
     {
@@ -292,6 +300,9 @@ void ModelViewer::CreateRootSignature()
     {
         featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
     }
+
+    // PBR IBL
+    m_pIBL->CreateRootSignature(m_device.Get());
 
     // G-Buffer Pass.
     {
@@ -397,6 +408,11 @@ void ModelViewer::CreateRootSignature()
 
 void ModelViewer::CreatePipelineState()
 {
+    // SSAO Pass.
+    m_pIBL->CreatePipelineState(m_device.Get(), GetAssetFullPath(L"VS.cso"), GetAssetFullPath(L"GenBRDFLUT.cso"), 
+        GetAssetFullPath(L"VS.cso"), GetAssetFullPath(L"VS.cso"), GetAssetFullPath(L"VS.cso"),
+        GetAssetFullPath(L"VS.cso"), GetAssetFullPath(L"VS.cso"));
+
     // G-Buffer Pass.
     {
         ComPtr<ID3DBlob> vertexShader;
@@ -482,13 +498,14 @@ void ModelViewer::LoadAssets()
     m_pModel = std::make_unique<DXModel>(s_assetFullPath);
 
     D3D12_DESCRIPTOR_HEAP_DESC cbvSrvHeapDesc = {};
-    cbvSrvHeapDesc.NumDescriptors = 
+    cbvSrvHeapDesc.NumDescriptors =
         1 +                                 // Camera
         1 +                                 // Light
         m_pModel->primitiveSize +           // Model Primitive
         (m_pModel->materialSize * 6) +      // Model Material
         4 +                                 // G Buffer
-        4;                                  // SSAO
+        4 +                                 // SSAO
+        1;                                  // PBR IBL
     cbvSrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     cbvSrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvSrvHeapDesc, IID_PPV_ARGS(&m_cbvSrvHeap)));
@@ -524,6 +541,35 @@ void ModelViewer::LoadAssets()
     }
 
     m_pSSAO->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), m_pModel->cbvSrvOffsetEnd + 4, m_cbvSrvDescriptorSize);
+
+    m_pIBL->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), m_pSSAO->ssaoCbvSrvOffsetEnd, m_cbvSrvDescriptorSize);
+}
+
+void ModelViewer::PreCompute()
+{
+    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+    ID3D12DescriptorHeap* ppHeaps[] = { m_cbvSrvHeap.Get(), m_samplerHeap.Get() };
+
+    // PBR IBL Generate BRDFLUT.
+    {
+        ThrowIfFailed(m_commandAllocator->Reset());
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), nullptr));
+
+        m_commandList->SetGraphicsRootSignature(m_pIBL->GetGenBRDFLUTRootSignature());
+
+        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(BRDFLUTDim), static_cast<float>(BRDFLUTDim));
+        CD3DX12_RECT scissorRect(0, 0, static_cast<LONG>(BRDFLUTDim), static_cast<LONG>(BRDFLUTDim));
+        m_commandList->RSSetViewports(1, &viewport);
+        m_commandList->RSSetScissorRects(1, &scissorRect);
+
+        m_pIBL->PreCompute(m_commandList.Get());
+    }
+
+    ThrowIfFailed(m_commandList->Close());
+    ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+    WaitForPreviousFrame();
 }
 
 void ModelViewer::OnUpdate()
@@ -659,7 +705,7 @@ void ModelViewer::PopulateCommandList()
             m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_pModel->cbvSrvOffsetEnd + 3, m_cbvSrvDescriptorSize);
         m_commandList->SetGraphicsRootDescriptorTable(0, srvHandle);
         CD3DX12_GPU_DESCRIPTOR_HANDLE ssaoSrvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(
-            m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_pSSAO->ssaoCbvSrvOffset + 2, m_cbvSrvDescriptorSize);
+            m_cbvSrvHeap->GetGPUDescriptorHandleForHeapStart(), m_pSSAO->ssaoCbvSrvOffset + 3, m_cbvSrvDescriptorSize);
         m_commandList->SetGraphicsRootDescriptorTable(1, ssaoSrvHandle);
 
         m_commandList->SetPipelineState(m_pipelineState.Get());
