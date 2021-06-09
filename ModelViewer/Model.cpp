@@ -20,14 +20,14 @@ DXMaterial::DXMaterial(std::shared_ptr<tinygltf::Model> model, const tinygltf::M
 
     if (gltfHelperMaterial.BaseColorTexture.Image != nullptr)
         baseColorImage = gltfHelperMaterial.BaseColorTexture.Image;
-    //if (gltfHelperMaterial.MetallicRoughnessTexture.Image != nullptr)
-    //    metallicRoughnessImage = gltfHelperMaterial.MetallicRoughnessTexture.Image;
-    //if (gltfHelperMaterial.EmissiveTexture.Image != nullptr)
-    //    emissiveImage = gltfHelperMaterial.EmissiveTexture.Image;
-    //if (gltfHelperMaterial.NormalTexture.Image != nullptr)
-    //    normalImage = gltfHelperMaterial.NormalTexture.Image;
-    //if (gltfHelperMaterial.OcclusionTexture.Image != nullptr)
-    //    occlusionImage = gltfHelperMaterial.OcclusionTexture.Image;
+    if (gltfHelperMaterial.MetallicRoughnessTexture.Image != nullptr)
+        metallicRoughnessImage = gltfHelperMaterial.MetallicRoughnessTexture.Image;
+    if (gltfHelperMaterial.EmissiveTexture.Image != nullptr)
+        emissiveImage = gltfHelperMaterial.EmissiveTexture.Image;
+    if (gltfHelperMaterial.NormalTexture.Image != nullptr)
+        normalImage = gltfHelperMaterial.NormalTexture.Image;
+    if (gltfHelperMaterial.OcclusionTexture.Image != nullptr)
+        occlusionImage = gltfHelperMaterial.OcclusionTexture.Image;
 }
 
 DXMaterial::~DXMaterial()

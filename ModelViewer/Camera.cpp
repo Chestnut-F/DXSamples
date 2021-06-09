@@ -12,7 +12,7 @@ DXCamera::DXCamera(XMVECTOR pos, XMVECTOR lookDir, XMVECTOR up):
 	
     float cosYaw = XMVectorGetX(XMVector3Dot(XMVector3Normalize({ lookDirection.x, 0.0f, lookDirection.z }), { 0.0f, 0.0f, 1.0f }));
 	yaw = XMScalarACos(cosYaw);
-    float cosPitch = XMVectorGetX(XMVector3Dot(XMVector3Normalize({ 0.0f, upDirection.y, upDirection.z }), { 0.0f, 1.0f, 0.0f }));
+    float cosPitch = XMVectorGetX(XMVector3Dot(XMVector3Normalize({ 0.0f, upDirection.y, upDirection.z }), up));
 	pitch = XMScalarACos(cosPitch);
 
     pitch = min(pitch, XM_PIDIV4);
@@ -24,9 +24,9 @@ void DXCamera::Update(float elapsedSeconds, float fov, float aspectRatio, float 
     XMFLOAT3 move(0, 0, 0);
 
     if (keysPressed.a)
-        move.x -= 1.0f;
+        upDirection.y < 0.99 ? move.x += 1.0f : move.x -= 1.0f;
     if (keysPressed.d)
-        move.x += 1.0f;
+        upDirection.y < 0.99 ? move.x -= 1.0f : move.x += 1.0f;
     if (keysPressed.w)
         move.z += 1.0f;
     if (keysPressed.s)
@@ -43,13 +43,13 @@ void DXCamera::Update(float elapsedSeconds, float fov, float aspectRatio, float 
     float rotateInterval = turnSpeed * elapsedSeconds;
 
     if (keysPressed.left)
-        yaw += rotateInterval;
+        upDirection.y < 0.99 ? yaw -= rotateInterval : yaw += rotateInterval;
     if (keysPressed.right)
-        yaw -= rotateInterval;
+        upDirection.y < 0.99 ? yaw += rotateInterval : yaw -= rotateInterval;
     if (keysPressed.up)
-        pitch += rotateInterval;
+        upDirection.y < 0.99 ? pitch -= rotateInterval : pitch += rotateInterval;
     if (keysPressed.down)
-        pitch -= rotateInterval;
+        upDirection.y < 0.99 ? pitch += rotateInterval : pitch -= rotateInterval;
 
     pitch = min(pitch, XM_PIDIV4);
     pitch = max(-XM_PIDIV4, pitch);

@@ -11,9 +11,11 @@ ModelViewer::ModelViewer(UINT width, UINT height, std::wstring name):
 
 void ModelViewer::OnInit()
 {
-    m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 0.0f, 1.0f, 0.0f }), XMVECTOR({ -1.0f, 0.0f, 0.0f }));
+    m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 2.0f, 0.0f, 2.0f }), XMVECTOR({ -1.0f, 0.0f, -1.0f }), XMVECTOR({ 0.0f, -1.0f, 0.0f }));
     m_pLight = std::make_unique<DXLight>(XMFLOAT3({ 0.0f, 100.0f, 0.0f }), 2000.0f);
+#ifdef SSAO_ON
     m_pSSAO = std::make_unique<SSAO>();
+#endif // SSAO_ON
     m_pIBL = std::make_unique<DXImageBasedLighting>();
 
     InitDevice();
@@ -135,11 +137,17 @@ void ModelViewer::CreateDescriptorHeaps()
 {
     // Describe and create a render target view (RTV) descriptor heap.
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
+#ifdef SSAO_ON
     rtvHeapDesc.NumDescriptors =
         FrameCount +                // Frame Count
         4 +                         // G Buffer
         2 +                         // SSAO + SSAO Blur
         1;                          // PBR IBL
+#else
+    rtvHeapDesc.NumDescriptors =
+        FrameCount +                // Frame Count
+        4;                          // G Buffer
+#endif // SSAO_ON
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
@@ -237,12 +245,12 @@ void ModelViewer::CreateDescriptorHeaps()
         rtvHandle.Offset(1, m_rtvDescriptorSize);
     }
 
+    INT offset = 0;
+#ifdef SSAO_ON
     // Create ssao render targets that are the same dimensions as the swap chain.
-    INT offset = m_pSSAO->Init(m_device.Get(), m_width, m_height, rtvHandle, m_rtvDescriptorSize);
+    offset = m_pSSAO->Init(m_device.Get(), m_width, m_height, rtvHandle, m_rtvDescriptorSize);
     rtvHandle.Offset(offset, m_rtvDescriptorSize);
-
-    offset = m_pIBL->Init(m_device.Get(), rtvHandle, m_rtvDescriptorSize);
-    rtvHandle.Offset(offset, m_rtvDescriptorSize);
+#endif // SSAO_ON
 
     // Describe and create a depth stencil view (DSV) descriptor heap.
     {
@@ -306,7 +314,7 @@ void ModelViewer::CreateRootSignature()
 
     // G-Buffer Pass.
     {
-        CD3DX12_DESCRIPTOR_RANGE1 ranges[9];
+        CD3DX12_DESCRIPTOR_RANGE1 ranges[12];
         ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
         ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 1, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
         ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 2, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
@@ -316,8 +324,11 @@ void ModelViewer::CreateRootSignature()
         ranges[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
         ranges[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
         ranges[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 4, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+        ranges[9].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 5, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+        ranges[10].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 6, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+        ranges[11].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 7, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
 
-        CD3DX12_ROOT_PARAMETER1 rootParameters[9];
+        CD3DX12_ROOT_PARAMETER1 rootParameters[12];
         rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_ALL);
         rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_ALL);
         rootParameters[2].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_ALL);
@@ -327,21 +338,19 @@ void ModelViewer::CreateRootSignature()
         rootParameters[6].InitAsDescriptorTable(1, &ranges[6], D3D12_SHADER_VISIBILITY_PIXEL);
         rootParameters[7].InitAsDescriptorTable(1, &ranges[7], D3D12_SHADER_VISIBILITY_PIXEL);
         rootParameters[8].InitAsDescriptorTable(1, &ranges[8], D3D12_SHADER_VISIBILITY_PIXEL);
+        rootParameters[9].InitAsDescriptorTable(1, &ranges[9], D3D12_SHADER_VISIBILITY_PIXEL);
+        rootParameters[10].InitAsDescriptorTable(1, &ranges[10], D3D12_SHADER_VISIBILITY_PIXEL);
+        rootParameters[11].InitAsDescriptorTable(1, &ranges[11], D3D12_SHADER_VISIBILITY_PIXEL);
 
-        D3D12_STATIC_SAMPLER_DESC sampler = {};
-        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-        sampler.MipLODBias = 0;
-        sampler.MaxAnisotropy = 0;
-        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-        sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-        sampler.MinLOD = 0.0f;
-        sampler.MaxLOD = D3D12_FLOAT32_MAX;
-        sampler.ShaderRegister = 0;
-        sampler.RegisterSpace = 0;
-        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        CD3DX12_STATIC_SAMPLER_DESC defaultSampler(0, D3D12_FILTER_ANISOTROPIC);
+        defaultSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        CD3DX12_STATIC_SAMPLER_DESC brdflutSampler(1, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+        brdflutSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        brdflutSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        brdflutSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = { defaultSampler,brdflutSampler };
 
         // Allow input layout and deny uneccessary access to certain pipeline stages.
         D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
@@ -351,7 +360,7 @@ void ModelViewer::CreateRootSignature()
             D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
         CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 1, &sampler, rootSignatureFlags);
+        rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 2, staticSamplers, rootSignatureFlags);
 
         ComPtr<ID3DBlob> signature;
         ComPtr<ID3DBlob> error;
@@ -360,11 +369,14 @@ void ModelViewer::CreateRootSignature()
         NAME_D3D12_OBJECT(m_gbufferRootSignature);
     }
 
+#ifdef SSAO_ON
     // SSAO Pass.
     m_pSSAO->CreateRootSignature(m_device.Get());
+#endif // SSAO_ON
 
     // Final Pass.
     {
+#ifdef SSAO_ON
         CD3DX12_DESCRIPTOR_RANGE1 ranges[2];
         ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
         ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0);
@@ -372,16 +384,22 @@ void ModelViewer::CreateRootSignature()
         CD3DX12_ROOT_PARAMETER1 rootParameters[2];
         rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_PIXEL);
         rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
+#else
+        CD3DX12_DESCRIPTOR_RANGE1 ranges[1];
+        ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
+
+        CD3DX12_ROOT_PARAMETER1 rootParameters[1];
+        rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_PIXEL);
+#endif // SSAO_ON
 
         D3D12_STATIC_SAMPLER_DESC sampler = {};
-        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         sampler.MipLODBias = 0;
         sampler.MaxAnisotropy = 0;
         sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-        sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
         sampler.MinLOD = 0.0f;
         sampler.MaxLOD = D3D12_FLOAT32_MAX;
         sampler.ShaderRegister = 0;
@@ -409,17 +427,15 @@ void ModelViewer::CreateRootSignature()
 void ModelViewer::CreatePipelineState()
 {
     // SSAO Pass.
-    m_pIBL->CreatePipelineState(m_device.Get(), GetAssetFullPath(L"VS.cso"), GetAssetFullPath(L"GenBRDFLUT.cso"), 
-        GetAssetFullPath(L"VS.cso"), GetAssetFullPath(L"VS.cso"), GetAssetFullPath(L"VS.cso"),
-        GetAssetFullPath(L"VS.cso"), GetAssetFullPath(L"VS.cso"));
+    //m_pIBL->CreatePipelineState(m_device.Get(), GetAssetFullPath(L"BRDFLUT.cso"));
 
     // G-Buffer Pass.
     {
         ComPtr<ID3DBlob> vertexShader;
         ComPtr<ID3DBlob> pixelShader;
 
-        ThrowIfFailed(D3DReadFileToBlob(GetAssetFullPath(L"GbufferVS.cso").c_str(), &vertexShader));
-        ThrowIfFailed(D3DReadFileToBlob(GetAssetFullPath(L"GbufferPS.cso").c_str(), &pixelShader));
+        ThrowIfFailed(D3DReadFileToBlob(GetAssetFullPath(L"PBRVS.cso").c_str(), &vertexShader));
+        ThrowIfFailed(D3DReadFileToBlob(GetAssetFullPath(L"PBRPS.cso").c_str(), &pixelShader));
 
         // Define the vertex input layout.
         D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
@@ -453,9 +469,11 @@ void ModelViewer::CreatePipelineState()
         NAME_D3D12_OBJECT(m_gbufferState);
     }
 
+#ifdef SSAO_ON
     // SSAO Pass.
-    m_pSSAO->CreatePipelineState(m_device.Get(), GetAssetFullPath(L"VS.cso"), 
+    m_pSSAO->CreatePipelineState(m_device.Get(), GetAssetFullPath(L"VS.cso"),
         GetAssetFullPath(L"SSAO.cso"), GetAssetFullPath(L"SSAOBlur.cso"));
+#endif // SSAO_ON
 
     // Final Pass.
     {
@@ -490,14 +508,18 @@ void ModelViewer::CreatePipelineState()
 
 void ModelViewer::LoadAssets()
 {
-    std::wstring ws_assetFullPath = GetAssetFullPath(L"..\\..\\models\\Sponza\\Sponza.gltf");
     using convert_typeX = std::codecvt_utf8<wchar_t>;
     std::wstring_convert<convert_typeX, wchar_t> converterX;
-    std::string s_assetFullPath(converterX.to_bytes(ws_assetFullPath));
 
+    //std::wstring ws_assetFullPath = GetAssetFullPath(L"..\\..\\models\\Sponza\\Sponza.gltf");
+    std::wstring ws_assetFullPath = GetAssetFullPath(L"..\\..\\models\\DamagedHelmet\\DamagedHelmet.gltf");
+    std::string s_assetFullPath(converterX.to_bytes(ws_assetFullPath));
     m_pModel = std::make_unique<DXModel>(s_assetFullPath);
 
+    std::wstring ws_envMapFullPath = GetAssetFullPath(L"..\\..\\textures\\gcanyon_cube.dds");
+
     D3D12_DESCRIPTOR_HEAP_DESC cbvSrvHeapDesc = {};
+#ifdef SSAO_ON
     cbvSrvHeapDesc.NumDescriptors =
         1 +                                 // Camera
         1 +                                 // Light
@@ -506,20 +528,29 @@ void ModelViewer::LoadAssets()
         4 +                                 // G Buffer
         4 +                                 // SSAO
         1;                                  // PBR IBL
+#else
+    cbvSrvHeapDesc.NumDescriptors =
+        1 +                                 // Camera
+        1 +                                 // Light
+        m_pModel->primitiveSize +           // Model Primitive
+        (m_pModel->materialSize * 6) +      // Model Material
+        4 +                                 // G Buffer
+        20;                                 // PBR IBL
+#endif // SSAO_ON
     cbvSrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     cbvSrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvSrvHeapDesc, IID_PPV_ARGS(&m_cbvSrvHeap)));
-    NAME_D3D12_OBJECT(m_cbvSrvHeap);
+    ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvSrvHeapDesc, IID_PPV_ARGS(&m_cbvSrvUavHeap)));
+    NAME_D3D12_OBJECT(m_cbvSrvUavHeap);
 
     m_cbvSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     
-    m_pCamera->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), 0, m_cbvSrvDescriptorSize);
-    m_pLight->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), 1, m_cbvSrvDescriptorSize);
-    m_pModel->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), 2, m_cbvSrvDescriptorSize);
+    m_pCamera->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvUavHeap.Get(), 0, m_cbvSrvDescriptorSize);
+    m_pLight->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvUavHeap.Get(), 1, m_cbvSrvDescriptorSize);
+    m_pModel->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvUavHeap.Get(), 2, m_cbvSrvDescriptorSize);
 
     {
         CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(
-            m_cbvSrvHeap->GetCPUDescriptorHandleForHeapStart(), m_pModel->cbvSrvOffsetEnd, m_cbvSrvDescriptorSize);
+            m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), m_pModel->cbvSrvOffsetEnd, m_cbvSrvDescriptorSize);
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -540,34 +571,61 @@ void ModelViewer::LoadAssets()
         srvHandle.Offset(1, m_cbvSrvDescriptorSize);
     }
 
-    m_pSSAO->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), m_pModel->cbvSrvOffsetEnd + 4, m_cbvSrvDescriptorSize);
-
-    m_pIBL->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvHeap.Get(), m_pSSAO->ssaoCbvSrvOffsetEnd, m_cbvSrvDescriptorSize);
+#ifdef SSAO_ON
+    m_pSSAO->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvUavHeap.Get(), m_pModel->cbvSrvOffsetEnd + 4, m_cbvSrvDescriptorSize);
+    m_pIBL->Upload(m_device.Get(), m_commandList.Get(), m_cbvSrvUavHeap.Get(), m_pSSAO->ssaoCbvSrvOffsetEnd, m_cbvSrvDescriptorSize);
+#else
+    m_pIBL->Upload(m_device.Get(), ws_envMapFullPath, m_commandList.Get(), m_cbvSrvUavHeap.Get(), m_pModel->cbvSrvOffsetEnd + 4, m_cbvSrvDescriptorSize);
+#endif // SSAO_ON
 }
 
 void ModelViewer::PreCompute()
 {
-    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-    ID3D12DescriptorHeap* ppHeaps[] = { m_cbvSrvHeap.Get(), m_samplerHeap.Get() };
-
     // PBR IBL Generate BRDFLUT.
     {
         ThrowIfFailed(m_commandAllocator->Reset());
         ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), nullptr));
 
-        m_commandList->SetGraphicsRootSignature(m_pIBL->GetGenBRDFLUTRootSignature());
+        m_commandList->SetGraphicsRootSignature(m_pIBL->GetComputeRootSignature());
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(BRDFLUTDim), static_cast<float>(BRDFLUTDim));
-        CD3DX12_RECT scissorRect(0, 0, static_cast<LONG>(BRDFLUTDim), static_cast<LONG>(BRDFLUTDim));
-        m_commandList->RSSetViewports(1, &viewport);
-        m_commandList->RSSetScissorRects(1, &scissorRect);
-
-        m_pIBL->PreCompute(m_commandList.Get());
+        m_pIBL->GenerateBRDFLUT(m_device.Get(), GetAssetFullPath(L"BRDFLUT.cso"), m_commandList.Get(), m_cbvSrvUavHeap.Get());
     }
 
     ThrowIfFailed(m_commandList->Close());
-    ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
-    m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+    ID3D12CommandList* ppCommandLists_1[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists_1), ppCommandLists_1);
+
+    WaitForPreviousFrame();
+
+    // Prefilter Environment Map.
+    {
+        ThrowIfFailed(m_commandAllocator->Reset());
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), nullptr));
+
+        m_commandList->SetGraphicsRootSignature(m_pIBL->GetComputeRootSignature());
+
+        m_pIBL->PrefilterEnvMap(m_device.Get(), GetAssetFullPath(L"EnvironmentMap.cso"), m_commandList.Get(), m_cbvSrvUavHeap.Get(), m_cbvSrvDescriptorSize);
+    }
+
+    ThrowIfFailed(m_commandList->Close());
+    ID3D12CommandList* ppCommandLists_2[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists_2), ppCommandLists_2);
+
+    WaitForPreviousFrame();
+
+    // Irradiance Map.
+    {
+        ThrowIfFailed(m_commandAllocator->Reset());
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), nullptr));
+
+        m_commandList->SetGraphicsRootSignature(m_pIBL->GetComputeRootSignature());
+
+        m_pIBL->IrradianceMap(m_device.Get(), GetAssetFullPath(L"IrradianceMap.cso"), m_commandList.Get(), m_cbvSrvUavHeap.Get());
+    }
+
+    ThrowIfFailed(m_commandList->Close());
+    ID3D12CommandList* ppCommandLists_3[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists_3), ppCommandLists_3);
 
     WaitForPreviousFrame();
 }
@@ -589,7 +647,6 @@ void ModelViewer::OnUpdate()
 
     m_pCamera->Update(static_cast<float>(m_timer.GetElapsedSeconds()), XM_PI / 3.0f, m_aspectRatio);
     m_pLight->Update();
-    m_pSSAO->Update();
 }
 
 void ModelViewer::OnRender()
@@ -598,6 +655,7 @@ void ModelViewer::OnRender()
     PopulateCommandList();
 
     // Execute the command list.
+    ThrowIfFailed(m_commandList->Close());
     ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
     m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
@@ -610,7 +668,7 @@ void ModelViewer::OnRender()
 void ModelViewer::PopulateCommandList()
 {
     const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-    ID3D12DescriptorHeap* ppHeaps[] = { m_cbvSrvHeap.Get(), m_samplerHeap.Get() };
+    ID3D12DescriptorHeap* ppHeaps[] = { m_cbvSrvUavHeap.Get(), m_samplerHeap.Get() };
 
     // G-Buffer Pass
     {
@@ -647,9 +705,13 @@ void ModelViewer::PopulateCommandList()
 
         m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 
-        m_pCamera->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), 0, m_cbvSrvDescriptorSize);
-        m_pLight->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), 1, m_cbvSrvDescriptorSize);
-        m_pModel->Render(m_commandList.Get(), m_cbvSrvHeap.Get(), m_samplerHeap.Get(), 2, m_cbvSrvDescriptorSize);
+        m_commandList->SetGraphicsRootDescriptorTable(9, m_pIBL->brdfLUTSrvGPUHandle);
+        m_commandList->SetGraphicsRootDescriptorTable(10, m_pIBL->filteredEnvMapSrvGPUHandle);
+        m_commandList->SetGraphicsRootDescriptorTable(11, m_pIBL->irMapSrvGPUHandle);
+
+        m_pCamera->Render(m_commandList.Get(), m_cbvSrvUavHeap.Get(), 0, m_cbvSrvDescriptorSize);
+        m_pLight->Render(m_commandList.Get(), m_cbvSrvUavHeap.Get(), 1, m_cbvSrvDescriptorSize);
+        m_pModel->Render(m_commandList.Get(), m_cbvSrvUavHeap.Get(), m_samplerHeap.Get(), 2, m_cbvSrvDescriptorSize);
 
         m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
             m_positionDepthRenderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
@@ -661,6 +723,7 @@ void ModelViewer::PopulateCommandList()
             m_albedoRenderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
     }
 
+#ifdef SSAO_ON
     // SSAO Pass.
     {
         m_commandList->SetGraphicsRootSignature(m_pSSAO->GetRootSignature());
@@ -688,7 +751,7 @@ void ModelViewer::PopulateCommandList()
     // Final Pass.
     {
         m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-        
+
         m_commandList->RSSetViewports(1, &m_viewport);
         m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
@@ -720,6 +783,38 @@ void ModelViewer::PopulateCommandList()
 
         ThrowIfFailed(m_commandList->Close());
     }
+#else
+    // Final Pass.
+    {
+        m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+
+        m_commandList->RSSetViewports(1, &m_viewport);
+        m_commandList->RSSetScissorRects(1, &m_scissorRect);
+
+        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+            m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
+
+        m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        m_commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, nullptr);
+
+        CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(
+            m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), m_pModel->cbvSrvOffsetEnd + 3, m_cbvSrvDescriptorSize);
+        m_commandList->SetGraphicsRootDescriptorTable(0, srvHandle);
+
+        m_commandList->SetPipelineState(m_pipelineState.Get());
+
+        m_commandList->IASetVertexBuffers(0, 0, nullptr);
+        m_commandList->IASetIndexBuffer(nullptr);
+        m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        m_commandList->DrawInstanced(6, 1, 0, 0);
+
+        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+    }
+#endif // SSAO_ON
 }
 
 void ModelViewer::OnDestroy()

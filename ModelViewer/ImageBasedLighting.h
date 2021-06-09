@@ -1,10 +1,13 @@
 #pragma once
+#include "stb_image.h"
 #include "DXSampleHelper.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 
-static const UINT BRDFLUTDim = 512;
+static const UINT IrradianceMapDim = 32u;
+static const UINT BRDFLUTDim = 512u;
+static const UINT FilteredEnvMapDim = 1024u;
 
 class DXImageBasedLighting
 {
@@ -12,33 +15,59 @@ public:
 	DXImageBasedLighting();
 
 	void CreateRootSignature(ID3D12Device* device);
-	void CreatePipelineState(ID3D12Device* device, const std::wstring& vsGenBRDFLUTName, const std::wstring& psGenBRDFLUTName,
-		const std::wstring& vsFilterCubeName, const std::wstring& psIrradianceCubeName, const std::wstring& psPreFilterEnvMapName,
-		const std::wstring& vsPBRIBLName, const std::wstring& psPBRIBLName);
+	//void CreatePipelineState(ID3D12Device* device, const std::wstring& csBRDFLUTName);
 
 	INT Init(ID3D12Device* device, CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle, UINT rtvDescriptorSize);
-	void PreCompute(ID3D12GraphicsCommandList* commandList);
 	void Update();
-	void Upload(ID3D12Device* device, ID3D12GraphicsCommandList* commandList,
-		ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize);
+	void Upload(ID3D12Device* device, const std::wstring& fileFullPath,
+		ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap, INT offsetInHeap, UINT cbvSrvDescriptorSize);
 	void Render(ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvHeap,
 		INT offsetInRootDescriptorTable, UINT cbvSrvDescriptorSize, CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle);
 
-	INT iblCbvSrvOffset;
-	INT iblCbvSrvOffsetEnd;
+	void GenerateBRDFLUT(ID3D12Device* device, const std::wstring& csBRDFLUTName,
+		ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvUavHeap);
+	void PrefilterEnvMap(ID3D12Device* device, const std::wstring& csEnvMapame,
+		ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvUavHeap, UINT cbvSrvDescriptorSize);
+	void IrradianceMap(ID3D12Device* device, const std::wstring& csIrMapame,
+		ID3D12GraphicsCommandList* commandList, ID3D12DescriptorHeap* cbvSrvUavHeap);
 
-	ID3D12RootSignature* GetRootSignature() { return iblRootSignature.Get(); }
-	ID3D12RootSignature* GetGenBRDFLUTRootSignature() { return genBRDFLUTRootSignature.Get(); }
+	INT iblCbvSrvUavOffset;
+	INT iblCbvSrvUavOffsetEnd;
 
+	//ID3D12RootSignature* GetRootSignature() { return iblRootSignature.Get(); }
+	ID3D12RootSignature* GetComputeRootSignature() { return computeRootSignature.Get(); }
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE brdfLUTSrvCPUHandle;
+	CD3DX12_GPU_DESCRIPTOR_HANDLE brdfLUTSrvGPUHandle;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE irMapSrvCPUHandle;
+	CD3DX12_GPU_DESCRIPTOR_HANDLE irMapSrvGPUHandle;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE filteredEnvMapSrvCPUHandle;
+	CD3DX12_GPU_DESCRIPTOR_HANDLE filteredEnvMapSrvGPUHandle;
 private:
-	ComPtr<ID3D12RootSignature> genBRDFLUTRootSignature;
-	ComPtr<ID3D12RootSignature> iblRootSignature;
-	ComPtr<ID3D12PipelineState> genBRDFLUTState;
-	ComPtr<ID3D12PipelineState> iblState;
-	
-	CD3DX12_CPU_DESCRIPTOR_HANDLE genBRDFLUTRtvHandle;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE genBRDFLUTSrvHandle;
-	ComPtr<ID3D12Resource> brdfLUTRenderTarget;
+	ComPtr<ID3D12RootSignature> computeRootSignature;
+	ComPtr<ID3D12RootSignature> rootSignature;
 
-	void GenerateBRDFLUT(ID3D12GraphicsCommandList* commandList);
+	ComPtr<ID3D12PipelineState> genBRDFLUTPipelineState;
+	ComPtr<ID3D12PipelineState> prefilterEnvMapPipelineState;
+	ComPtr<ID3D12PipelineState> irradianceMapPipelineState;
+	ComPtr<ID3D12PipelineState> pipelineState;
+	
+	CD3DX12_CPU_DESCRIPTOR_HANDLE brdfLUTUavCPUHandle;
+	CD3DX12_GPU_DESCRIPTOR_HANDLE brdfLUTUavGPUHandle;
+	ComPtr<ID3D12Resource> brdfLUT;
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE filteredEnvMapUavCPUHandle;
+	CD3DX12_GPU_DESCRIPTOR_HANDLE filteredEnvMapUavGPUHandle;
+	ComPtr<ID3D12Resource> filteredEnvMap;
+
+	std::unique_ptr<ScratchImage> envMap;
+	std::vector<D3D12_SUBRESOURCE_DATA> envMapSubresources;
+	ComPtr<ID3D12Resource> envMapTexture;
+	ComPtr<ID3D12Resource> envMapUploadHeap;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE envMapSrvCPUHandle;
+	CD3DX12_GPU_DESCRIPTOR_HANDLE envMapSrvGPUHandle;
+	
+	CD3DX12_CPU_DESCRIPTOR_HANDLE irMapUavCPUHandle;
+	CD3DX12_GPU_DESCRIPTOR_HANDLE irMapUavGPUHandle;
+	ComPtr<ID3D12Resource> irMap;
 };

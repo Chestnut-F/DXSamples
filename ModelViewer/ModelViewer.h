@@ -7,6 +7,8 @@
 #include "ImageBasedLighting.h"
 #include "StepTimer.h"
 
+//#define SSAO_ON
+
 class ModelViewer : public DXSample
 {
 public:
@@ -35,7 +37,7 @@ private:
     ComPtr<ID3D12CommandQueue> m_commandQueue;
     ComPtr<ID3D12CommandAllocator> m_commandAllocator;
     ComPtr<ID3D12GraphicsCommandList> m_commandList;
-    ComPtr<ID3D12DescriptorHeap> m_cbvSrvHeap;
+    ComPtr<ID3D12DescriptorHeap> m_cbvSrvUavHeap;
     ComPtr<ID3D12DescriptorHeap> m_samplerHeap;
     UINT m_cbvSrvDescriptorSize;
 
@@ -47,8 +49,10 @@ private:
     ComPtr<ID3D12Resource> m_tangentRenderTarget;
     ComPtr<ID3D12Resource> m_albedoRenderTarget;
 
+#ifdef SSAO_ON
     // SSAO
     std::unique_ptr<SSAO> m_pSSAO;
+#endif // SSAO_ON
 
     // Render targets.
     ComPtr<ID3D12RootSignature> m_rootSignature;

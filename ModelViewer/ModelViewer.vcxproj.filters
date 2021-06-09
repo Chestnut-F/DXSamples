@@ -118,8 +118,23 @@
     <FxCompile Include="SSAOBlur.hlsl">
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="GenBRDFLUT.hlsl">
+    <FxCompile Include="BRDFLUT.hlsl">
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="EnvironmentMap.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="IrradianceMap.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRPS.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRVS.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>
