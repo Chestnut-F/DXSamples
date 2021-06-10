@@ -101,10 +101,10 @@ PSOutput main(VSOutput input)
     float3 reflection = PrefilteredReflection(R, roughness).rgb;
     float3 irradiance = irradianceTexture.Sample(defaultSampler, N).rgb;
 
-    float3 diffuse = kd * irradiance * albedo;
+    float3 diffuse = occlusion * kd * irradiance * albedo;
     float3 specular = reflection * (F * brdf.x + brdf.y);
     float3 ambient = emissive + diffuse + specular;
 
-    output.albedo = float4(occlusion * ambient, 1.0);
+    output.albedo = float4(ambient, 1.0);
     return output;
 }
