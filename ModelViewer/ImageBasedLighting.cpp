@@ -17,7 +17,7 @@ void DXImageBasedLighting::CreateRootSignature(ID3D12Device* device)
         featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
     }
 
-    // Create an empty root signature for generate BRDFLUT.
+    // Create a root signature for compute shader.
     {
         CD3DX12_DESCRIPTOR_RANGE1 ranges[2];
         ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
@@ -166,7 +166,9 @@ void DXImageBasedLighting::Upload(ID3D12Device* device, const std::wstring& file
             static_cast<unsigned int>(envMapSubresources.size()), 
             envMapSubresources.data());
         commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-            envMapTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+            envMapTexture.Get(), 
+            D3D12_RESOURCE_STATE_COPY_DEST, 
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -332,7 +334,7 @@ void DXImageBasedLighting::PrefilterEnvMap(ID3D12Device* device, const std::wstr
     commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
         filteredEnvMap.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST));
     commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-        envMapTexture.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE));
+        envMapTexture.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE));
 
     for (UINT arraySlice = 0; arraySlice < 6; ++arraySlice) {
         const UINT subresourceIndex = D3D12CalcSubresource(0, arraySlice, 0, static_cast<UINT>(envMap->GetMetadata().mipLevels), 6u);
@@ -346,7 +348,7 @@ void DXImageBasedLighting::PrefilterEnvMap(ID3D12Device* device, const std::wstr
     }
 
     commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-        envMapTexture.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+        envMapTexture.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
     commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
         filteredEnvMap.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
@@ -400,7 +402,7 @@ void DXImageBasedLighting::IrradianceMap(ID3D12Device* device, const std::wstrin
     commandList->SetPipelineState(irradianceMapPipelineState.Get());
     commandList->SetComputeRootSignature(computeRootSignature.Get());
     commandList->SetComputeRootDescriptorTable(0, envMapSrvGPUHandle);
-    commandList->SetComputeRootDescriptorTable(1, irMapSrvGPUHandle);
+    commandList->SetComputeRootDescriptorTable(1, irMapUavGPUHandle);
     const float delta[2] = { (2.0f * XM_PI) / 180.0f, (0.5f * XM_PI) / 64.0f };
     commandList->SetComputeRoot32BitConstants(2, 2, &delta, 0);
 

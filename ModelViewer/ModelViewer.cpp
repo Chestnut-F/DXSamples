@@ -11,7 +11,7 @@ ModelViewer::ModelViewer(UINT width, UINT height, std::wstring name):
 
 void ModelViewer::OnInit()
 {
-    m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 2.0f, 0.0f, 2.0f }), XMVECTOR({ -1.0f, 0.0f, -1.0f }), XMVECTOR({ 0.0f, -1.0f, 0.0f }));
+    m_pCamera = std::make_unique<DXCamera>(XMVECTOR({ 2.0f, 0.0f, -2.0f }), XMVECTOR({ -1.0f, 0.0f, 1.0f }), XMVECTOR({ 0.0f, -1.0f, 0.0f }));
     m_pLight = std::make_unique<DXLight>(XMFLOAT3({ 0.0f, 100.0f, 0.0f }), 2000.0f);
 #ifdef SSAO_ON
     m_pSSAO = std::make_unique<SSAO>();
@@ -312,6 +312,40 @@ void ModelViewer::CreateRootSignature()
     // PBR IBL
     m_pIBL->CreateRootSignature(m_device.Get());
 
+    // Skybox pass.
+    {
+        CD3DX12_DESCRIPTOR_RANGE1 ranges[2];
+        ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+        ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+
+        CD3DX12_ROOT_PARAMETER1 rootParameters[2];
+        rootParameters[0].InitAsDescriptorTable(1, &ranges[0]);
+        rootParameters[1].InitAsDescriptorTable(1, &ranges[1]);
+
+        D3D12_STATIC_SAMPLER_DESC sampler = {};
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sampler.MipLODBias = 0;
+        sampler.MaxAnisotropy = 0;
+        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        sampler.MinLOD = 0.0f;
+        sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        sampler.ShaderRegister = 0;
+        sampler.RegisterSpace = 0;
+        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+        rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 1, &sampler);
+
+        ComPtr<ID3DBlob> signature;
+        ComPtr<ID3DBlob> error;
+        ThrowIfFailed(D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, featureData.HighestVersion, &signature, &error));
+        ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_skyboxRootSignature)));
+        NAME_D3D12_OBJECT(m_skyboxRootSignature);
+    }
+
     // G-Buffer Pass.
     {
         CD3DX12_DESCRIPTOR_RANGE1 ranges[12];
@@ -428,6 +462,34 @@ void ModelViewer::CreatePipelineState()
 {
     // SSAO Pass.
     //m_pIBL->CreatePipelineState(m_device.Get(), GetAssetFullPath(L"BRDFLUT.cso"));
+
+    // Skybox Pass.
+    {
+        ComPtr<ID3DBlob> vertexShader;
+        ComPtr<ID3DBlob> pixelShader;
+
+        ThrowIfFailed(D3DReadFileToBlob(GetAssetFullPath(L"SkyboxVS.cso").c_str(), &vertexShader));
+        ThrowIfFailed(D3DReadFileToBlob(GetAssetFullPath(L"SkyboxPS.cso").c_str(), &pixelShader));
+
+        // Describe and create the graphics pipeline state object (PSO).
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+        psoDesc.InputLayout = { nullptr, 0 };
+        psoDesc.pRootSignature = m_skyboxRootSignature.Get();
+        psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
+        psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
+        psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        psoDesc.SampleMask = UINT_MAX;
+        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        psoDesc.NumRenderTargets = 1;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        psoDesc.SampleDesc.Count = 1;
+
+        ThrowIfFailed(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_skyboxState)));
+        NAME_D3D12_OBJECT(m_skyboxState);
+    }
 
     // G-Buffer Pass.
     {
@@ -670,10 +732,40 @@ void ModelViewer::PopulateCommandList()
     const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
     ID3D12DescriptorHeap* ppHeaps[] = { m_cbvSrvUavHeap.Get(), m_samplerHeap.Get() };
 
-    // G-Buffer Pass
+    // Skybox Pass.
     {
         ThrowIfFailed(m_commandAllocator->Reset());
-        ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), m_gbufferState.Get()));
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), m_skyboxState.Get()));
+        m_commandList->SetGraphicsRootSignature(m_skyboxRootSignature.Get());
+        m_commandList->RSSetViewports(1, &m_viewport);
+        m_commandList->RSSetScissorRects(1, &m_scissorRect);
+
+        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            m_albedoRenderTarget.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+        CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), FrameCount + 3, m_rtvDescriptorSize);
+
+        m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        m_commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+
+        m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+
+        m_pCamera->Render(m_commandList.Get(), m_cbvSrvUavHeap.Get(), 0, m_cbvSrvDescriptorSize);
+        m_commandList->SetGraphicsRootDescriptorTable(1, m_pIBL->envMapSrvGPUHandle);
+
+        m_commandList->IASetVertexBuffers(0, 0, nullptr);
+        m_commandList->IASetIndexBuffer(nullptr);
+        m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        m_commandList->DrawInstanced(36, 1, 0, 0);
+
+        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            m_albedoRenderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+    }
+
+    // G-Buffer Pass
+    {
         m_commandList->SetGraphicsRootSignature(m_gbufferRootSignature.Get());
         m_commandList->RSSetViewports(1, &m_viewport);
         m_commandList->RSSetScissorRects(1, &m_scissorRect);
@@ -699,7 +791,7 @@ void ModelViewer::PopulateCommandList()
         m_commandList->ClearRenderTargetView(rtvHandle[0], clearColor, 0, nullptr);
         m_commandList->ClearRenderTargetView(rtvHandle[1], clearColor, 0, nullptr);
         m_commandList->ClearRenderTargetView(rtvHandle[2], clearColor, 0, nullptr);
-        m_commandList->ClearRenderTargetView(rtvHandle[3], clearColor, 0, nullptr);
+        //m_commandList->ClearRenderTargetView(rtvHandle[3], clearColor, 0, nullptr);
         m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
         m_commandList->OMSetRenderTargets(4, &rtvHandle[0], FALSE, &dsvHandle);
 
@@ -708,6 +800,8 @@ void ModelViewer::PopulateCommandList()
         m_commandList->SetGraphicsRootDescriptorTable(9, m_pIBL->brdfLUTSrvGPUHandle);
         m_commandList->SetGraphicsRootDescriptorTable(10, m_pIBL->filteredEnvMapSrvGPUHandle);
         m_commandList->SetGraphicsRootDescriptorTable(11, m_pIBL->irMapSrvGPUHandle);
+
+        m_commandList->SetPipelineState(m_gbufferState.Get());
 
         m_pCamera->Render(m_commandList.Get(), m_cbvSrvUavHeap.Get(), 0, m_cbvSrvDescriptorSize);
         m_pLight->Render(m_commandList.Get(), m_cbvSrvUavHeap.Get(), 1, m_cbvSrvDescriptorSize);

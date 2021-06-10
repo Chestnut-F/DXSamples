@@ -41,6 +41,10 @@ private:
     ComPtr<ID3D12DescriptorHeap> m_samplerHeap;
     UINT m_cbvSrvDescriptorSize;
 
+    // Skybox render targets.
+    ComPtr<ID3D12RootSignature> m_skyboxRootSignature;
+    ComPtr<ID3D12PipelineState> m_skyboxState;
+
     // Intermediate render targets.
     ComPtr<ID3D12RootSignature> m_gbufferRootSignature;
     ComPtr<ID3D12PipelineState> m_gbufferState;

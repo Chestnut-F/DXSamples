@@ -22,8 +22,9 @@ cbuffer Material : register(b3)
 
 Texture2D albedoMapTexture : register(t0);
 Texture2D metallicRoughnessTexture : register(t1);
+Texture2D emissiveTexture : register(t2);
 Texture2D normalMapTexture : register(t3);
-
+Texture2D occlusionTexture : register(t4);
 Texture2D brdflutTexture : register(t5);
 TextureCube prefilteredMapTexture : register(t6);
 TextureCube irradianceTexture : register(t7);
@@ -88,6 +89,8 @@ PSOutput main(VSOutput input)
     float3 albedo = gBaseColorFactor.rgb * albedoMapTexture.Sample(defaultSampler, input.uv).rgb;
     float metallic = gMetallicFactor * metallicRoughnessTexture.Sample(defaultSampler, input.uv).b;
     float roughness = gRoughnessFactor * metallicRoughnessTexture.Sample(defaultSampler, input.uv).g;
+    float3 emissive = gEmissiveFactor * emissiveTexture.Sample(defaultSampler, input.uv).rgb;
+    float occlusion = gOcclusionStrength * occlusionTexture.Sample(defaultSampler, input.uv).r;
 
     float3 F0 = float3(0.04, 0.04, 0.04);
     F0 = lerp(F0, albedo, metallic);
@@ -100,8 +103,8 @@ PSOutput main(VSOutput input)
 
     float3 diffuse = kd * irradiance * albedo;
     float3 specular = reflection * (F * brdf.x + brdf.y);
-    float3 ambient = diffuse + specular;
+    float3 ambient = emissive + diffuse + specular;
 
-    output.albedo = float4(ambient, 1.0);
+    output.albedo = float4(occlusion * ambient, 1.0);
     return output;
 }

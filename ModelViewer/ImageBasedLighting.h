@@ -9,6 +9,13 @@ static const UINT IrradianceMapDim = 32u;
 static const UINT BRDFLUTDim = 512u;
 static const UINT FilteredEnvMapDim = 1024u;
 
+struct SkyboxConstantBuffer
+{
+	XMFLOAT4X4 Model;
+	float padding[48]; // Padding so the constant buffer is 256-byte aligned.
+};
+static_assert((sizeof(SkyboxConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
+
 class DXImageBasedLighting
 {
 public:
@@ -43,6 +50,8 @@ public:
 	CD3DX12_GPU_DESCRIPTOR_HANDLE irMapSrvGPUHandle;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE filteredEnvMapSrvCPUHandle;
 	CD3DX12_GPU_DESCRIPTOR_HANDLE filteredEnvMapSrvGPUHandle;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE envMapSrvCPUHandle;
+	CD3DX12_GPU_DESCRIPTOR_HANDLE envMapSrvGPUHandle;
 private:
 	ComPtr<ID3D12RootSignature> computeRootSignature;
 	ComPtr<ID3D12RootSignature> rootSignature;
@@ -64,8 +73,6 @@ private:
 	std::vector<D3D12_SUBRESOURCE_DATA> envMapSubresources;
 	ComPtr<ID3D12Resource> envMapTexture;
 	ComPtr<ID3D12Resource> envMapUploadHeap;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE envMapSrvCPUHandle;
-	CD3DX12_GPU_DESCRIPTOR_HANDLE envMapSrvGPUHandle;
 	
 	CD3DX12_CPU_DESCRIPTOR_HANDLE irMapUavCPUHandle;
 	CD3DX12_GPU_DESCRIPTOR_HANDLE irMapUavGPUHandle;

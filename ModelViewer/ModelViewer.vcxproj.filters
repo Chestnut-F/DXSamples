@@ -133,6 +133,12 @@
     <FxCompile Include="PBRVS.hlsl">
       <Filter>资源文件\Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="SkyboxVS.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="SkyboxPS.hlsl">
+      <Filter>资源文件\Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
